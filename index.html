@@ -102,8 +102,12 @@
       <span class="label" id="photoLabel">Photo <span class="optional">optional</span></span>
       <div class="photo" role="group" aria-labelledby="photoLabel">
         <img id="fPhotoPreview" alt="Item photo" hidden>
-        <button type="button" id="fPhotoPick" class="btn">Add photo</button>
-        <button type="button" id="fPhotoRemove" class="btn" hidden>Remove</button>
+        <div class="photo-buttons">
+          <button type="button" id="fPhotoCamera" class="btn"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg><span>Take photo</span></button>
+          <button type="button" id="fPhotoPick" class="btn">Gallery</button>
+          <button type="button" id="fPhotoRemove" class="btn danger" hidden>Remove</button>
+        </div>
+        <input id="fPhotoCameraFile" type="file" accept="image/*" capture="environment" hidden>
         <input id="fPhotoFile" type="file" accept="image/*" hidden>
       </div>
 

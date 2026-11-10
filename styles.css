@@ -273,7 +273,8 @@ label, .label { display: block; font-size: .9rem; font-weight: 600; margin: 14px
 .inline { display: flex; gap: 8px; }
 .inline input { flex: 1; min-width: 0; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.photo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.photo { display: flex; align-items: center; gap: 12px; }
+.photo-buttons { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
 .photo img {
   width: 88px; height: 88px; object-fit: cover;
   border-radius: 12px; border: 1px solid var(--border);

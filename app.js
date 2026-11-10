@@ -471,12 +471,13 @@ function showFormPhoto(dataUrl) {
   preview.hidden = !formPhoto;
   if (formPhoto) preview.src = formPhoto; else preview.removeAttribute('src');
   $('fPhotoRemove').hidden = !formPhoto;
-  $('fPhotoPick').textContent = formPhoto ? 'Change photo' : 'Add photo';
 }
 
+// "Take photo" opens the phone's camera directly; "Gallery" picks an existing picture.
+$('fPhotoCamera').addEventListener('click', () => $('fPhotoCameraFile').click());
 $('fPhotoPick').addEventListener('click', () => $('fPhotoFile').click());
 $('fPhotoRemove').addEventListener('click', () => showFormPhoto(null));
-$('fPhotoFile').addEventListener('change', async (e) => {
+async function onPhotoPicked(e) {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
@@ -485,7 +486,9 @@ $('fPhotoFile').addEventListener('change', async (e) => {
   } catch {
     toast('That file could not be read as an image.');
   }
-});
+}
+$('fPhotoCameraFile').addEventListener('change', onPhotoPicked);
+$('fPhotoFile').addEventListener('change', onPhotoPicked);
 
 function openItem(item, presetBarcode) {
   editingId = item ? item.id : null;
