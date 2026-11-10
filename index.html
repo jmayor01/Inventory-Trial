@@ -26,6 +26,14 @@
   <main>
     <p id="status" class="status" role="status" hidden></p>
 
+    <section id="installBar" class="install" aria-label="Install this app" hidden>
+      <p><strong>Install Inventory</strong><br><span class="hint">Add it to your home screen for quick access.</span></p>
+      <div class="install-buttons">
+        <button type="button" id="installLater" class="btn ghost">Not now</button>
+        <button type="button" id="installBtn" class="btn primary">Install</button>
+      </div>
+    </section>
+
     <div class="searchrow">
       <div class="searchbox">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -157,6 +165,17 @@
     <div class="dlg-actions">
       <span class="spacer"></span>
       <button type="button" id="menuClose" class="btn">Close</button>
+    </div>
+  </dialog>
+
+  <!-- How to install on browsers that cannot show an install prompt -->
+  <dialog id="installDlg" aria-labelledby="installTitle">
+    <h2 id="installTitle">Install Inventory</h2>
+    <p class="hint">This browser cannot install the app with one tap. Do it in three steps:</p>
+    <ol id="installSteps" class="steps"></ol>
+    <div class="dlg-actions">
+      <span class="spacer"></span>
+      <button type="button" id="installClose" class="btn primary">Got it</button>
     </div>
   </dialog>
 

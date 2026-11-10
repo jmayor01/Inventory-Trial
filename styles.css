@@ -106,6 +106,17 @@ textarea { resize: vertical; }
 .btn.square { width: 48px; padding: 0; flex: none; }
 .btn:disabled { opacity: .55; cursor: default; }
 
+/* ---------- Install prompt ---------- */
+.install {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
+  margin-bottom: 12px; padding: 12px 14px;
+  background: var(--primary-soft); border: 1px solid var(--primary); border-radius: var(--radius);
+}
+.install p { flex: 1; min-width: 180px; }
+.install-buttons { display: flex; gap: 8px; margin-left: auto; }
+.install .btn { min-height: 44px; }
+.steps { margin: 12px 0 0; padding-left: 1.4em; display: grid; gap: 10px; }
+
 /* ---------- Search, totals, filters ---------- */
 .searchrow { display: flex; gap: 8px; }
 .searchbox { position: relative; flex: 1; min-width: 0; }

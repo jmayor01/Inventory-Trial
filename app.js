@@ -946,6 +946,79 @@ $('legacyBtn').addEventListener('click', async () => {
   $('legacyBtn').disabled = false;
 });
 
+// ---------- Install prompt ----------
+// Chrome, Edge, Samsung Internet and other Chromium browsers let the page show
+// the real install prompt. Safari and Firefox do not, so there we explain the
+// few taps it takes instead.
+
+const INSTALL_DISMISSED_KEY = 'inventory.installDismissed';
+const INSTALL_SNOOZE_MS = 14 * 24 * 60 * 60 * 1000;
+let installEvent = null; // the browser's own install prompt, when it offers one
+
+function installSteps() {
+  const ua = navigator.userAgent;
+  const iOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (iOS) {
+    return [
+      'Tap the Share button (the square with an arrow pointing up).',
+      'Scroll down and tap "Add to Home Screen".',
+      'Tap "Add". The Inventory icon appears on your home screen.',
+    ];
+  }
+  if (/Android/.test(ua) && /Firefox/.test(ua)) {
+    return [
+      'Tap the menu button (three dots).',
+      'Tap "Add app to Home screen" (or "Install").',
+      'Tap "Add". The Inventory icon appears on your home screen.',
+    ];
+  }
+  return null; // no known manual route on this browser
+}
+
+function isInstalled() {
+  return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+}
+
+function maybeShowInstallBar() {
+  let snoozed = false;
+  try { snoozed = Date.now() - Number(localStorage.getItem(INSTALL_DISMISSED_KEY) || 0) < INSTALL_SNOOZE_MS; } catch { /* ignore */ }
+  $('installBar').hidden = isInstalled() || snoozed || !(installEvent || installSteps());
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); // keep it for our own Install button
+  installEvent = e;
+  maybeShowInstallBar();
+});
+window.addEventListener('appinstalled', () => {
+  installEvent = null;
+  $('installBar').hidden = true;
+  toast('Inventory is installed');
+});
+
+$('installBtn').addEventListener('click', async () => {
+  if (installEvent) {
+    const prompt = installEvent;
+    installEvent = null; // a prompt can only be used once
+    prompt.prompt();
+    const choice = await prompt.userChoice.catch(() => null);
+    if (!choice || choice.outcome !== 'accepted') maybeShowInstallBar();
+    else $('installBar').hidden = true;
+    return;
+  }
+  const steps = installSteps();
+  if (!steps) return;
+  $('installSteps').replaceChildren(...steps.map((s) => el('li', '', s)));
+  $('installDlg').showModal();
+});
+$('installClose').addEventListener('click', () => $('installDlg').close());
+$('installLater').addEventListener('click', () => {
+  try { localStorage.setItem(INSTALL_DISMISSED_KEY, String(Date.now())); } catch { /* ignore */ }
+  $('installBar').hidden = true;
+});
+
+maybeShowInstallBar();
+
 // ---------- Misc ----------
 
 let toastTimer;

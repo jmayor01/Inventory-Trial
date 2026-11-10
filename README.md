@@ -72,6 +72,12 @@ with no build command and the repository root as the output folder.
 
 ## Install on a phone
 
+The app shows an **Install** banner by itself. In Chrome, Edge and Samsung
+Internet the button installs it directly; in Safari and Firefox it shows the
+steps, because those browsers do not let a page start the installation.
+
+By hand:
+
 - **Android (Chrome):** open the link → menu **⋮** → **Add to Home screen**.
 - **iPhone / iPad (Safari):** open the link → **Share** → **Add to Home Screen**.
 
