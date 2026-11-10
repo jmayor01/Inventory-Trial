@@ -72,6 +72,9 @@ textarea { resize: vertical; }
 .btn.danger { color: var(--danger); border-color: var(--danger); }
 .btn.ghost { border-color: transparent; color: var(--primary); }
 
+.searchrow { display: flex; gap: 8px; }
+.searchrow input { flex: 1; min-width: 0; }
+
 .summary { color: var(--muted); font-size: .9rem; margin: 10px 2px; }
 
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }

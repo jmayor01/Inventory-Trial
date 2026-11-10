@@ -23,9 +23,14 @@
     <div class="searchrow">
       <label class="sr-only" for="search">Search items</label>
       <input id="search" type="search" placeholder="Search name, description or barcode" autocomplete="off">
+      <button id="searchScan" type="button" class="btn" aria-label="Search by scanning a barcode">Scan</button>
     </div>
     <p id="summary" class="summary" aria-live="polite"></p>
     <ul id="list" class="list"></ul>
+    <div id="noResults" class="empty" hidden>
+      <p><strong id="noResultsText"></strong></p>
+      <p><button id="noResultsAdd" type="button" class="btn primary">Add as new item</button></p>
+    </div>
     <div id="empty" class="empty" hidden>
       <p><strong>No items yet.</strong></p>
       <p>Tap <em>Scan</em> to read a barcode with your camera, or <em>Add</em> to type an item in.</p>

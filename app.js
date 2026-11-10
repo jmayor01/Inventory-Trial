@@ -37,6 +37,9 @@ const toNumber = (v) => {
 
 // ---------- List ----------
 
+// Barcode most recently put into the search box by the camera.
+let scannedQuery = '';
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -83,6 +86,12 @@ function render() {
   }
 
   $('empty').hidden = items.length > 0;
+  const noResults = items.length > 0 && shown.length === 0;
+  $('noResults').hidden = !noResults;
+  if (noResults) {
+    const raw = $('search').value.trim();
+    $('noResultsText').textContent = raw === scannedQuery ? `No item has barcode ${raw}.` : `No item matches "${raw}".`;
+  }
   const total = items.reduce((sum, it) => sum + it.price * it.qty, 0);
   $('summary').textContent = items.length
     ? `${shown.length === items.length ? items.length : `${shown.length} of ${items.length}`} item${items.length === 1 ? '' : 's'} · total value ${money.format(total)}`
@@ -254,6 +263,20 @@ $('scanBtn').addEventListener('click', () =>
 
 $('addBtn').addEventListener('click', () => openItem(null));
 $('search').addEventListener('input', render);
+
+// Search by barcode: scan, then show only the matching item(s) in the list.
+$('searchScan').addEventListener('click', () =>
+  openScanner((code) => {
+    scannedQuery = code;
+    $('search').value = code;
+    render();
+  }),
+);
+
+$('noResultsAdd').addEventListener('click', () => {
+  const raw = $('search').value.trim();
+  openItem(null, raw === scannedQuery ? raw : '');
+});
 
 // ---------- Backup: CSV export / import ----------
 
