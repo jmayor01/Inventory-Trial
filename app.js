@@ -10,7 +10,7 @@ const $ = (id) => document.getElementById(id);
 
 const CACHE_KEY = 'inventory.cache.v2';
 const LEGACY_KEY = 'inventory.items.v1'; // items from before the inventory was shared
-const ITEM_COLUMNS = 'id,barcode,name,description,price,qty,photo_updated_at';
+const ITEM_COLUMNS = 'id,barcode,name,description,price,qty,photo_updated_at,updated_at';
 
 const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INVENTORY_CONFIG.supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -221,6 +221,69 @@ function el(tag, className, text) {
   return node;
 }
 
+function qtyControls(it) {
+  const qty = el('div', 'qty');
+  const minus = el('button', '', '−');
+  minus.type = 'button';
+  minus.setAttribute('aria-label', `Decrease quantity of ${it.name}`);
+  minus.disabled = it.qty <= 0;
+  minus.addEventListener('click', () => changeQty(it.id, -1));
+  const out = el('output', '', String(it.qty));
+  out.setAttribute('aria-label', `Quantity ${it.qty}`);
+  const plus = el('button', '', '+');
+  plus.type = 'button';
+  plus.setAttribute('aria-label', `Increase quantity of ${it.name}`);
+  plus.addEventListener('click', () => changeQty(it.id, 1));
+  qty.append(minus, out, plus);
+  return qty;
+}
+
+/** Full details of one item: large photo and every field. */
+function detailCard(it) {
+  const li = el('li', 'detail');
+  li.setAttribute('aria-label', `Details of ${it.name}`);
+
+  if (photos.has(it.id)) {
+    const img = el('img', 'detail-photo');
+    img.src = photos.get(it.id);
+    img.alt = `Photo of ${it.name}`;
+    li.append(img);
+  } else if (it.photo_updated_at) {
+    li.append(el('p', 'detail-nophoto', 'Loading photo…'));
+  }
+
+  li.append(el('h2', 'detail-name', it.name));
+  li.append(el('p', it.description ? 'detail-desc' : 'detail-desc muted', it.description || 'No description'));
+
+  const facts = el('dl', 'detail-facts');
+  const fact = (label, value) => {
+    const dd = el('dd');
+    dd.append(value);
+    facts.append(el('dt', '', label), dd);
+  };
+  fact('Price', money.format(it.price));
+  fact('In stock', qtyControls(it));
+  fact('Stock value', money.format(it.price * it.qty));
+  fact('Barcode', it.barcode || 'None');
+  const updated = it.updated_at ? new Date(it.updated_at) : null;
+  if (updated && !Number.isNaN(updated.getTime())) {
+    fact('Last updated', updated.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }));
+  }
+  li.append(facts);
+
+  const actions = el('div', 'detail-actions');
+  const back = el('button', 'btn', 'Show all items');
+  back.type = 'button';
+  back.addEventListener('click', () => { $('search').value = ''; render(); });
+  const edit = el('button', 'btn primary', 'Edit');
+  edit.type = 'button';
+  edit.setAttribute('aria-label', `Edit ${it.name}`);
+  edit.addEventListener('click', () => openItem(it));
+  actions.append(back, edit);
+  li.append(actions);
+  return li;
+}
+
 function render() {
   const q = $('search').value.trim().toLowerCase();
   const shown = items
@@ -229,7 +292,10 @@ function render() {
 
   const list = $('list');
   list.replaceChildren();
-  for (const it of shown) {
+  // A search that narrows down to one item shows everything about it.
+  const single = q && shown.length === 1 ? shown[0] : null;
+  if (single) list.append(detailCard(single));
+  for (const it of single ? [] : shown) {
     const li = el('li', 'item');
 
     const main = el('button', 'item-main');
@@ -249,19 +315,7 @@ function render() {
     main.append(text);
     main.addEventListener('click', () => openItem(it));
 
-    const qty = el('div', 'qty');
-    const minus = el('button', '', '−');
-    minus.type = 'button';
-    minus.setAttribute('aria-label', `Decrease quantity of ${it.name}`);
-    minus.disabled = it.qty <= 0;
-    minus.addEventListener('click', () => changeQty(it.id, -1));
-    const out = el('output', '', String(it.qty));
-    out.setAttribute('aria-label', `Quantity ${it.qty}`);
-    const plus = el('button', '', '+');
-    plus.type = 'button';
-    plus.setAttribute('aria-label', `Increase quantity of ${it.name}`);
-    plus.addEventListener('click', () => changeQty(it.id, 1));
-    qty.append(minus, out, plus);
+    const qty = qtyControls(it);
 
     li.append(main, qty);
     list.append(li);

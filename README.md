@@ -12,7 +12,8 @@ Android and iOS with nothing to install from an app store.
 - **Add / edit / delete** items: barcode, name, description, price, quantity,
   and an optional photo taken with the camera or picked from the gallery.
 - **+ / −** buttons to adjust stock straight from the list.
-- **Search** by name, description or barcode; the header shows the total stock value.
+- **Search** by name, description or barcode (typed or scanned). When the
+  search matches a single item, its full details and large photo are shown.
 - **Shared** — items and photos are stored online; a change made on one phone
   shows up on the others.
 - **Backup** — export everything to CSV (opens in Excel / Google Sheets) and
