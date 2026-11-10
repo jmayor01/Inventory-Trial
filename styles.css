@@ -91,6 +91,12 @@ textarea { resize: vertical; }
   background: none; border: 0; border-radius: 8px;
   padding: 6px 8px; cursor: pointer;
 }
+.item-main { display: flex; align-items: center; gap: 10px; }
+.item-text { flex: 1; min-width: 0; }
+.item-thumb {
+  flex: none; width: 56px; height: 56px; object-fit: cover;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--bg);
+}
 .item-name { font-weight: 600; overflow-wrap: anywhere; }
 .item-desc { color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
 .item-meta { color: var(--muted); font-size: .8rem; margin-top: 2px; overflow-wrap: anywhere; }
@@ -128,7 +134,12 @@ dialog {
 }
 dialog::backdrop { background: rgba(0, 0, 0, .55); }
 dialog h2 { font-size: 1.15rem; margin-bottom: 8px; }
-label { display: block; font-size: .9rem; font-weight: 600; margin: 12px 0 4px; }
+label, .label { display: block; font-size: .9rem; font-weight: 600; margin: 12px 0 4px; }
+.photo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.photo img {
+  width: 96px; height: 96px; object-fit: cover;
+  border-radius: 10px; border: 1px solid var(--border);
+}
 .inline { display: flex; gap: 8px; }
 .inline input { flex: 1; min-width: 0; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

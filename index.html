@@ -22,7 +22,7 @@
   <main>
     <div class="searchrow">
       <label class="sr-only" for="search">Search items</label>
-      <input id="search" type="search" placeholder="Search name, description or barcode" autocomplete="off">
+      <input id="search" type="search" placeholder="Search name or barcode" autocomplete="off">
       <button id="searchScan" type="button" class="btn" aria-label="Search by scanning a barcode">Scan</button>
     </div>
     <p id="summary" class="summary" aria-live="polite"></p>
@@ -58,6 +58,14 @@
 
       <label for="fDesc">Description</label>
       <textarea id="fDesc" name="description" rows="3"></textarea>
+
+      <span class="label" id="photoLabel">Photo (optional)</span>
+      <div class="photo" role="group" aria-labelledby="photoLabel">
+        <img id="fPhotoPreview" alt="Item photo" hidden>
+        <button type="button" id="fPhotoPick" class="btn">Add photo</button>
+        <button type="button" id="fPhotoRemove" class="btn" hidden>Remove</button>
+        <input id="fPhotoFile" type="file" accept="image/*" hidden>
+      </div>
 
       <div class="two">
         <div>
@@ -96,7 +104,7 @@
   <!-- Backup -->
   <dialog id="menuDlg" aria-labelledby="menuTitle">
     <h2 id="menuTitle">Backup</h2>
-    <p class="hint">Items are stored on this device. Export a CSV file to back them up, open them in Excel or Google Sheets, or move them to another device.</p>
+    <p class="hint">Items are stored on this device. Export a CSV file to back them up, open them in Excel or Google Sheets, or move them to another device. Photos are not included in the CSV file.</p>
     <div class="stack">
       <button type="button" id="exportBtn" class="btn">Export CSV</button>
       <button type="button" id="importBtn" class="btn">Import CSV</button>

@@ -35,6 +35,78 @@ const toNumber = (v) => {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 };
 
+// ---------- Photos ----------
+// Photos are shrunk and kept in IndexedDB (keyed by item id), because they are
+// too big for localStorage. `photos` mirrors the store so the list can render
+// without waiting.
+
+const PHOTO_MAX_SIDE = 640;
+const photos = new Map();
+let photoDb = null;
+
+function openPhotoDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('inventory', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('photos');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function photoTx(mode, run) {
+  return new Promise((resolve, reject) => {
+    if (!photoDb) return reject(new Error('Photo storage is not available'));
+    const tx = photoDb.transaction('photos', mode);
+    const result = run(tx.objectStore('photos'));
+    tx.oncomplete = () => resolve(result);
+    tx.onerror = tx.onabort = () => reject(tx.error);
+  });
+}
+
+async function loadPhotos() {
+  try {
+    photoDb = await openPhotoDb();
+    await photoTx('readonly', (store) => {
+      store.openCursor().onsuccess = (e) => {
+        const cur = e.target.result;
+        if (cur) { photos.set(cur.key, cur.value); cur.continue(); }
+      };
+    });
+  } catch { /* e.g. private browsing: the app still works, without photos */ }
+}
+
+async function setPhoto(id, dataUrl) {
+  if (dataUrl) {
+    await photoTx('readwrite', (store) => store.put(dataUrl, id));
+    photos.set(id, dataUrl);
+  } else if (photos.has(id)) {
+    await photoTx('readwrite', (store) => store.delete(id));
+    photos.delete(id);
+  }
+}
+
+/** Shrinks a picked image file to a JPEG data URL no larger than PHOTO_MAX_SIDE. */
+function shrinkImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff'; // transparent PNGs would otherwise turn black as JPEG
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('not an image')); };
+    img.src = url;
+  });
+}
+
 // ---------- List ----------
 
 // Barcode most recently put into the search box by the camera.
@@ -61,10 +133,18 @@ function render() {
     const main = el('button', 'item-main');
     main.type = 'button';
     main.setAttribute('aria-label', `Edit ${it.name}`);
-    main.append(el('div', 'item-name', it.name));
-    if (it.description) main.append(el('div', 'item-desc', it.description));
-    main.append(el('div', 'item-price', money.format(it.price)));
-    if (it.barcode) main.append(el('div', 'item-meta', `Barcode ${it.barcode}`));
+    if (photos.has(it.id)) {
+      const thumb = el('img', 'item-thumb');
+      thumb.src = photos.get(it.id);
+      thumb.alt = '';
+      main.append(thumb);
+    }
+    const text = el('div', 'item-text');
+    text.append(el('div', 'item-name', it.name));
+    if (it.description) text.append(el('div', 'item-desc', it.description));
+    text.append(el('div', 'item-price', money.format(it.price)));
+    if (it.barcode) text.append(el('div', 'item-meta', `Barcode ${it.barcode}`));
+    main.append(text);
     main.addEventListener('click', () => openItem(it));
 
     const qty = el('div', 'qty');
@@ -110,6 +190,29 @@ function changeQty(id, delta) {
 // ---------- Item form ----------
 
 let editingId = null;
+let formPhoto = null; // data URL shown in the form, or null
+
+function showFormPhoto(dataUrl) {
+  formPhoto = dataUrl || null;
+  const preview = $('fPhotoPreview');
+  preview.hidden = !formPhoto;
+  if (formPhoto) preview.src = formPhoto; else preview.removeAttribute('src');
+  $('fPhotoRemove').hidden = !formPhoto;
+  $('fPhotoPick').textContent = formPhoto ? 'Change photo' : 'Add photo';
+}
+
+$('fPhotoPick').addEventListener('click', () => $('fPhotoFile').click());
+$('fPhotoRemove').addEventListener('click', () => showFormPhoto(null));
+$('fPhotoFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    showFormPhoto(await shrinkImage(file));
+  } catch {
+    toast('That file could not be read as an image.');
+  }
+});
 
 function openItem(item, presetBarcode) {
   editingId = item ? item.id : null;
@@ -119,13 +222,14 @@ function openItem(item, presetBarcode) {
   $('fDesc').value = item ? item.description : '';
   $('fPrice').value = item ? item.price : '';
   $('fQty').value = item ? item.qty : '';
+  showFormPhoto(item ? photos.get(item.id) : null);
   $('fDelete').hidden = !item;
   $('formError').hidden = true;
   $('itemDlg').showModal();
   if (!item) $(presetBarcode ? 'fName' : 'fBarcode').focus();
 }
 
-$('itemForm').addEventListener('submit', (e) => {
+$('itemForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = $('fName').value.trim();
   const barcode = $('fBarcode').value.trim();
@@ -147,12 +251,17 @@ $('itemForm').addEventListener('submit', (e) => {
     updatedAt: new Date().toISOString(),
   };
   const existing = items.find((x) => x.id === editingId);
+  const id = existing ? existing.id : newId();
   if (existing) Object.assign(existing, data);
-  else items.push({ id: newId(), ...data });
+  else items.push({ id, ...data });
   saveItems();
+  let photoSaved = true;
+  if (formPhoto !== (photos.get(id) || null)) {
+    try { await setPhoto(id, formPhoto); } catch { photoSaved = false; }
+  }
   render();
   $('itemDlg').close();
-  toast(existing ? 'Item updated' : 'Item added');
+  toast(!photoSaved ? 'Item saved, but the photo could not be stored on this device.' : existing ? 'Item updated' : 'Item added');
 });
 
 $('fCancel').addEventListener('click', () => $('itemDlg').close());
@@ -162,6 +271,7 @@ $('fDelete').addEventListener('click', () => {
   if (!it || !confirm(`Delete "${it.name}"? This cannot be undone.`)) return;
   items = items.filter((x) => x.id !== editingId);
   saveItems();
+  setPhoto(editingId, null).catch(() => {});
   render();
   $('itemDlg').close();
   toast('Item deleted');
@@ -389,3 +499,4 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 render();
+loadPhotos().then(() => { if (photos.size) render(); });

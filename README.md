@@ -8,11 +8,12 @@ same code runs on Android and iOS with nothing to install from an app store.
 
 - **Scan barcode** — opens the camera. A known barcode opens that item; a new
   one starts a new item with the barcode filled in.
-- **Add / edit / delete** items: barcode, name, description, price, quantity.
+- **Add / edit / delete** items: barcode, name, description, price, quantity,
+  and an optional photo taken with the camera or picked from the gallery.
 - **+ / −** buttons to adjust stock straight from the list.
 - **Search** by name, description or barcode; the header shows the total stock value.
 - **Backup** — export everything to CSV (opens in Excel / Google Sheets) and
-  import it again, on this or another device.
+  import it again, on this or another device. Photos are not part of the CSV.
 - Works offline once opened, and can be added to the home screen like an app.
 
 Supported codes: EAN-13, EAN-8, UPC-A, UPC-E, Code 128, Code 39, Code 93, ITF,
