@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Inventory</title>
+  <meta name="description" content="Simple inventory with barcode scanning">
+  <meta name="theme-color" content="#1f6feb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Inventory">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Inventory</h1>
+    <button id="menuBtn" class="btn ghost" aria-haspopup="dialog">Backup</button>
+  </header>
+
+  <main>
+    <div class="searchrow">
+      <label class="sr-only" for="search">Search items</label>
+      <input id="search" type="search" placeholder="Search name, description or barcode" autocomplete="off">
+    </div>
+    <p id="summary" class="summary" aria-live="polite"></p>
+    <ul id="list" class="list"></ul>
+    <div id="empty" class="empty" hidden>
+      <p><strong>No items yet.</strong></p>
+      <p>Tap <em>Scan</em> to read a barcode with your camera, or <em>Add</em> to type an item in.</p>
+    </div>
+  </main>
+
+  <nav class="actions" aria-label="Main actions">
+    <button id="addBtn" class="btn">+ Add</button>
+    <button id="scanBtn" class="btn primary">Scan barcode</button>
+  </nav>
+
+  <!-- Add / edit item -->
+  <dialog id="itemDlg" aria-labelledby="itemTitle">
+    <form id="itemForm" method="dialog" novalidate>
+      <h2 id="itemTitle">Add item</h2>
+
+      <label for="fBarcode">Barcode</label>
+      <div class="inline">
+        <input id="fBarcode" name="barcode" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button type="button" id="fScan" class="btn">Scan</button>
+      </div>
+
+      <label for="fName">Name <span aria-hidden="true">*</span></label>
+      <input id="fName" name="name" required autocomplete="off">
+
+      <label for="fDesc">Description</label>
+      <textarea id="fDesc" name="description" rows="3"></textarea>
+
+      <div class="two">
+        <div>
+          <label for="fPrice">Price</label>
+          <input id="fPrice" name="price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00">
+        </div>
+        <div>
+          <label for="fQty">Quantity</label>
+          <input id="fQty" name="qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0">
+        </div>
+      </div>
+
+      <p id="formError" class="error" role="alert" hidden></p>
+
+      <div class="dlg-actions">
+        <button type="button" id="fDelete" class="btn danger" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="fCancel" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Camera scanner -->
+  <dialog id="scanDlg" aria-labelledby="scanTitle">
+    <h2 id="scanTitle">Scan barcode</h2>
+    <p class="hint">Point the camera at the barcode and hold steady.</p>
+    <video id="scanVideo" playsinline muted aria-label="Camera preview"></video>
+    <p id="scanError" class="error" role="alert" hidden></p>
+    <div class="dlg-actions">
+      <span class="spacer"></span>
+      <button type="button" id="scanCancel" class="btn">Cancel</button>
+    </div>
+  </dialog>
+
+  <!-- Backup -->
+  <dialog id="menuDlg" aria-labelledby="menuTitle">
+    <h2 id="menuTitle">Backup</h2>
+    <p class="hint">Items are stored on this device. Export a CSV file to back them up, open them in Excel or Google Sheets, or move them to another device.</p>
+    <div class="stack">
+      <button type="button" id="exportBtn" class="btn">Export CSV</button>
+      <button type="button" id="importBtn" class="btn">Import CSV</button>
+      <input id="importFile" type="file" accept=".csv,text/csv" hidden>
+    </div>
+    <p id="menuMsg" class="hint" role="status"></p>
+    <div class="dlg-actions">
+      <span class="spacer"></span>
+      <button type="button" id="menuClose" class="btn">Close</button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="vendor/barcode-detector.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
