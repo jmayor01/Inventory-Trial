@@ -37,21 +37,25 @@ create table if not exists public.item_photos (
   data text not null check (data like 'data:image/%' and length(data) < 1500000)
 );
 
--- Access: signed-in users only --------------------------------------------------
+-- Access: open, no login ---------------------------------------------------------
+-- The app has no sign-in, so anyone who has the app link (or the publishable
+-- key in config.js) can read, change and delete everything in these two tables.
+-- Nothing else in the project is opened up.
 
 alter table public.items enable row level security;
 alter table public.item_photos enable row level security;
 
 drop policy if exists "Signed-in users can use items" on public.items;
-create policy "Signed-in users can use items" on public.items
-  for all to authenticated using (true) with check (true);
+drop policy if exists "Anyone can use items" on public.items;
+create policy "Anyone can use items" on public.items
+  for all to anon, authenticated using (true) with check (true);
 
 drop policy if exists "Signed-in users can use item photos" on public.item_photos;
-create policy "Signed-in users can use item photos" on public.item_photos
-  for all to authenticated using (true) with check (true);
+drop policy if exists "Anyone can use item photos" on public.item_photos;
+create policy "Anyone can use item photos" on public.item_photos
+  for all to anon, authenticated using (true) with check (true);
 
-revoke all on public.items, public.item_photos from anon;
-grant select, insert, update, delete on public.items, public.item_photos to authenticated;
+grant select, insert, update, delete on public.items, public.item_photos to anon, authenticated;
 
 -- Quantity +/- that stays correct when two people tap at the same time ----------
 
@@ -63,8 +67,8 @@ returns integer language sql security invoker set search_path = '' as $$
   returning qty;
 $$;
 
-revoke all on function public.adjust_qty(uuid, integer) from public, anon;
-grant execute on function public.adjust_qty(uuid, integer) to authenticated;
+revoke all on function public.adjust_qty(uuid, integer) from public;
+grant execute on function public.adjust_qty(uuid, integer) to anon, authenticated;
 
 -- Live updates: other phones see changes without reloading ----------------------
 

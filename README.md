@@ -1,8 +1,8 @@
 # Inventory
 
 A simple inventory app for phones. Add items with a description, price and
-quantity, and use the phone's camera to scan barcodes. Everyone who signs in
-sees the same shared inventory. It is a web app, so the same code runs on
+quantity, and use the phone's camera to scan barcodes. Everyone who opens the
+app sees the same shared inventory; there is no login. It is a web app, so the same code runs on
 Android and iOS with nothing to install from an app store.
 
 ## What it does
@@ -14,7 +14,7 @@ Android and iOS with nothing to install from an app store.
 - **+ / −** buttons to adjust stock straight from the list.
 - **Search** by name, description or barcode; the header shows the total stock value.
 - **Shared** — items and photos are stored online; a change made on one phone
-  shows up on the others. Users sign in with an email and password.
+  shows up on the others.
 - **Backup** — export everything to CSV (opens in Excel / Google Sheets) and
   import it again. Photos are not part of the CSV.
 - Can be added to the home screen like an app. Without a connection it shows
@@ -26,29 +26,27 @@ Codabar, QR and Data Matrix.
 ## Where the data lives
 
 Items and photos are stored in a [Supabase](https://supabase.com) database
-(the project is set in `config.js`). Only signed-in users can read or change
-them; this is enforced by the database rules in `supabase/setup.sql`, not just
-by the app. Each device keeps a copy of the list for offline viewing, which is
-removed when the user signs out.
+(the project is set in `config.js`). Each device also keeps a copy of the list
+for offline viewing.
+
+**There is no login.** Anyone who has the app link can view, change and delete
+every item and photo, and there is no record of who did what. Share the link
+only with people you trust, and use **Backup → Export CSV** regularly so the
+list can be restored if something is deleted.
 
 ## Set up Supabase (once)
 
-1. **Create the tables.** In the Supabase dashboard open **SQL Editor**, paste
-   the whole of [`supabase/setup.sql`](supabase/setup.sql) and press **Run**.
-2. **Turn off public sign-ups**, so that only people you add can get in:
-   **Authentication → Sign In / Providers → Allow new users to sign up → off**.
-   Without this step anyone who has the app link could create an account for
-   themselves.
-3. **Add your users.** **Authentication → Users → Add user → Create new user**:
-   enter an email and password and keep **Auto Confirm User** ticked. Give each
-   person their email and password. The app has no sign-up screen on purpose.
+In the Supabase dashboard open **SQL Editor**, paste the whole of
+[`supabase/setup.sql`](supabase/setup.sql) and press **Run**. It creates the
+tables and the rules that let the app use them. It is safe to run again, and
+it must be re-run whenever that file changes.
 
 To use a different Supabase project, change the two values in `config.js` (the
-*publishable* key only — never a secret key) and repeat the steps above.
+*publishable* key only — never a secret key) and run the script there.
 
 Items that were saved on a phone before the inventory became shared are not
-lost: after signing in on that phone the app offers to upload them, and the
-same option stays available under **Menu**.
+lost: the app offers to upload them the first time it opens, and the same
+option stays available under **Backup**.
 
 ## Deploy
 

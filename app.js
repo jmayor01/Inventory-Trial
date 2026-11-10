@@ -3,19 +3,22 @@
 const $ = (id) => document.getElementById(id);
 
 // ---------- Shared inventory (Supabase) ----------
-// Items live in a Supabase database so every signed-in user sees the same
-// list. This device only keeps a copy for viewing while offline.
+// Items live in a Supabase database so everyone who opens the app sees the same
+// list. There is no sign-in: the database rules in supabase/setup.sql allow
+// anyone to read and change the inventory. This device only keeps a copy for
+// viewing while offline.
 
 const CACHE_KEY = 'inventory.cache.v2';
 const LEGACY_KEY = 'inventory.items.v1'; // items from before the inventory was shared
 const ITEM_COLUMNS = 'id,barcode,name,description,price,qty,photo_updated_at';
 
-const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INVENTORY_CONFIG.supabaseKey);
+const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INVENTORY_CONFIG.supabaseKey, {
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+});
 
 /** @type {{id:string, barcode:string, name:string, description:string, price:number, qty:number, photo_updated_at:string|null}[]} */
 let items = [];
 let loaded = false; // false until the list has come from the server or the offline copy
-let userId = null;
 
 const fromRow = (r) => ({ ...r, price: Number(r.price) || 0, qty: Number(r.qty) || 0 });
 
@@ -32,21 +35,21 @@ function explain(error, fallback) {
   if (!navigator.onLine || /failed to fetch|networkerror|load failed/i.test(message)) return 'No internet connection. Try again when you are back online.';
   if (code === '23505') return 'That barcode is already used by another item.';
   if (code === '42P01' || code === 'PGRST205' || code === 'PGRST202') return 'The database is not set up yet. Run supabase/setup.sql in the Supabase SQL Editor.';
-  if (code === '42501' || code === 'PGRST301') return 'You do not have access. Sign out and sign in again.';
+  if (code === '42501' || code === 'PGRST301') return 'The database is not open to the app yet. Run the latest supabase/setup.sql in the Supabase SQL Editor.';
   return fallback;
 }
 
 function readCache() {
   try {
     const c = JSON.parse(localStorage.getItem(CACHE_KEY));
-    return c && c.userId === userId && Array.isArray(c.items) ? c.items : null;
+    return c && Array.isArray(c.items) ? c.items : null;
   } catch {
     return null;
   }
 }
 
 function writeCache() {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ userId, items })); } catch { /* storage full: offline copy is optional */ }
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ items })); } catch { /* storage full: offline copy is optional */ }
 }
 
 function setStatus(text) {
@@ -56,7 +59,6 @@ function setStatus(text) {
 
 /** Loads every item from the server. Throws on failure. */
 async function refresh() {
-  const forUser = userId;
   const rows = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await sb.from('items').select(ITEM_COLUMNS).order('id').range(from, from + 999);
@@ -64,7 +66,6 @@ async function refresh() {
     rows.push(...data);
     if (data.length < 1000) break;
   }
-  if (forUser !== userId) return; // signed out or switched user meanwhile
   items = rows.map(fromRow);
   loaded = true;
   writeCache();
@@ -73,12 +74,10 @@ async function refresh() {
 }
 
 async function refreshQuietly() {
-  if (!userId) return;
   try {
     await refresh();
     setStatus('');
   } catch (e) {
-    if (!userId) return;
     setStatus(`${explain(e, 'Could not load the latest items.')}${items.length ? ' Showing the copy saved on this device.' : ''}`);
     loaded = true;
     render();
@@ -93,12 +92,7 @@ function scheduleRefresh() {
 
 // Live updates: reload when anyone changes the items table.
 let channel = null;
-function stopRealtime() {
-  if (channel) sb.removeChannel(channel);
-  channel = null;
-}
 function startRealtime() {
-  stopRealtime();
   channel = sb.channel('items-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, scheduleRefresh)
     .subscribe();
@@ -167,12 +161,6 @@ function uncachePhoto(id) {
   photoTx(photoDb, 'readwrite', (store) => store.delete(id)).catch(() => {});
 }
 
-function clearPhotoCache() {
-  photos.clear();
-  photoVersion.clear();
-  photoTx(photoDb, 'readwrite', (store) => store.clear()).catch(() => {});
-}
-
 let photoSync = { running: false, again: false };
 async function syncPhotos() {
   if (photoSync.running) { photoSync.again = true; return; }
@@ -187,13 +175,13 @@ async function syncPhotos() {
       }
       if (changed) render();
       const stale = [...withPhoto.keys()].filter((id) => photoVersion.get(id) !== withPhoto.get(id));
-      for (let i = 0; i < stale.length && userId; i += 10) {
+      for (let i = 0; i < stale.length; i += 10) {
         const { data, error } = await sb.from('item_photos').select('item_id,data').in('item_id', stale.slice(i, i + 10));
         if (error) return; // offline: try again on the next refresh
         for (const row of data) cachePhoto(row.item_id, withPhoto.get(row.item_id), row.data);
         if (data.length) render();
       }
-    } while (photoSync.again && userId);
+    } while (photoSync.again);
   } finally {
     photoSync.running = false;
   }
@@ -730,7 +718,7 @@ async function runLegacyUpload() {
     toast(`Uploaded ${n} item${n === 1 ? '' : 's'} to the shared inventory`);
     return true;
   } catch (e) {
-    toast(explain(e, 'Could not upload the items. You can try again from the menu.'));
+    toast(explain(e, 'Could not upload the items. You can try again under Backup.'));
     return false;
   }
 }
@@ -740,7 +728,7 @@ function offerLegacyUpload() {
   const askedKey = `${LEGACY_KEY}.asked`;
   if (!n || localStorage.getItem(askedKey)) return;
   localStorage.setItem(askedKey, '1');
-  if (confirm(`This device has ${n} item${n === 1 ? '' : 's'} saved from before the inventory was shared. Upload ${n === 1 ? 'it' : 'them'} to the shared inventory now?\n\nYou can also do this later from the menu.`)) runLegacyUpload();
+  if (confirm(`This device has ${n} item${n === 1 ? '' : 's'} saved from before the inventory was shared. Upload ${n === 1 ? 'it' : 'them'} to the shared inventory now?\n\nYou can also do this later under Backup.`)) runLegacyUpload();
 }
 
 $('legacyBtn').addEventListener('click', async () => {
@@ -748,59 +736,6 @@ $('legacyBtn').addEventListener('click', async () => {
   if (await runLegacyUpload()) $('legacyBtn').hidden = true;
   $('legacyBtn').disabled = false;
 });
-
-// ---------- Sign in / out ----------
-
-$('loginForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const err = $('loginError');
-  err.hidden = true;
-  $('loginBtn').disabled = true;
-  const { error } = await sb.auth.signInWithPassword({ email: $('lEmail').value.trim(), password: $('lPassword').value });
-  $('loginBtn').disabled = false;
-  if (!error) { $('lPassword').value = ''; return; }
-  err.textContent = error.code === 'invalid_credentials' ? 'Wrong email or password.'
-    : error.code === 'email_not_confirmed' ? 'This account\'s email address has not been confirmed yet.'
-    : explain(error, 'Could not sign in. Please try again.');
-  err.hidden = false;
-});
-
-$('signOutBtn').addEventListener('click', async () => {
-  $('menuDlg').close();
-  // Do not leave the inventory behind on a device that is being signed out.
-  localStorage.removeItem(CACHE_KEY);
-  clearPhotoCache();
-  await sb.auth.signOut({ scope: 'local' });
-});
-
-let sessionApplied = false;
-function applySession(session) {
-  const id = (session && session.user && session.user.id) || null;
-  if (sessionApplied && id === userId) return; // e.g. a token refresh
-  sessionApplied = true;
-  userId = id;
-  setStatus('');
-  if (!id) {
-    stopRealtime();
-    items = [];
-    loaded = false;
-    for (const d of document.querySelectorAll('dialog[open]')) d.close();
-    document.body.dataset.view = 'login';
-    render();
-    return;
-  }
-  document.body.dataset.view = 'app';
-  $('accountEmail').textContent = session.user.email || '';
-  const cached = readCache();
-  items = cached || [];
-  loaded = Boolean(cached);
-  render();
-  startRealtime();
-  refreshQuietly().then(offerLegacyUpload);
-}
-
-// Supabase must not be called from inside this callback, hence the timeout.
-sb.auth.onAuthStateChange((event, session) => setTimeout(() => applySession(session), 0));
 
 // ---------- Misc ----------
 
@@ -820,4 +755,11 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
+// Start: show the copy saved on this device at once, then load the live list.
+const cached = readCache();
+items = cached || [];
+loaded = Boolean(cached);
+render();
 loadPhotoCache().then(() => { if (photos.size) render(); });
+startRealtime();
+refreshQuietly().then(offerLegacyUpload);
