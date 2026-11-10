@@ -211,14 +211,40 @@ function shrinkImage(file) {
 
 // ---------- List ----------
 
+const LOW_STOCK = 5; // "Low stock" means this many units or fewer (but not zero)
+const isOut = (it) => it.qty <= 0;
+const isLow = (it) => it.qty > 0 && it.qty <= LOW_STOCK;
+
 // Barcode most recently put into the search box by the camera.
 let scannedQuery = '';
+let stockFilter = 'all'; // 'all' | 'low' | 'out'
+let detailId = null; // item shown in the details dialog
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text != null) node.textContent = text;
   return node;
+}
+
+function stockBadge(it) {
+  if (isOut(it)) return el('span', 'badge out', 'Out of stock');
+  if (isLow(it)) return el('span', 'badge low', 'Low stock');
+  return null;
+}
+
+/** The item's photo, or a tile with its first letter when it has none. */
+function thumbFor(it) {
+  if (photos.has(it.id)) {
+    const img = el('img', 'thumb');
+    img.src = photos.get(it.id);
+    img.alt = '';
+    img.loading = 'lazy';
+    return img;
+  }
+  const tile = el('div', 'thumb placeholder', (it.name.trim()[0] || '?'));
+  tile.setAttribute('aria-hidden', 'true');
+  return tile;
 }
 
 function qtyControls(it) {
@@ -238,22 +264,29 @@ function qtyControls(it) {
   return qty;
 }
 
-/** Full details of one item: large photo and every field. */
-function detailCard(it) {
-  const li = el('li', 'detail');
-  li.setAttribute('aria-label', `Details of ${it.name}`);
+/**
+ * Full details of one item: large photo and every field. Used inline when a
+ * search matches a single item, and in the dialog opened by tapping a row.
+ */
+function detailCard(it, inDialog) {
+  const card = el(inDialog ? 'div' : 'li', 'detail');
+  card.setAttribute('aria-label', `Details of ${it.name}`);
 
   if (photos.has(it.id)) {
     const img = el('img', 'detail-photo');
     img.src = photos.get(it.id);
     img.alt = `Photo of ${it.name}`;
-    li.append(img);
+    card.append(img);
   } else if (it.photo_updated_at) {
-    li.append(el('p', 'detail-nophoto', 'Loading photo…'));
+    card.append(el('p', 'detail-nophoto', 'Loading photo…'));
   }
 
-  li.append(el('h2', 'detail-name', it.name));
-  li.append(el('p', it.description ? 'detail-desc' : 'detail-desc muted', it.description || 'No description'));
+  const head = el('div', 'detail-head');
+  head.append(el('h2', 'detail-name', it.name));
+  const badge = stockBadge(it);
+  if (badge) head.append(badge);
+  card.append(head);
+  card.append(el('p', it.description ? 'detail-desc' : 'detail-desc muted', it.description || 'No description'));
 
   const facts = el('dl', 'detail-facts');
   const fact = (label, value) => {
@@ -269,69 +302,135 @@ function detailCard(it) {
   if (updated && !Number.isNaN(updated.getTime())) {
     fact('Last updated', updated.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }));
   }
-  li.append(facts);
+  card.append(facts);
 
   const actions = el('div', 'detail-actions');
-  const back = el('button', 'btn', 'Show all items');
+  const back = el('button', 'btn', inDialog ? 'Close' : 'Show all items');
   back.type = 'button';
-  back.addEventListener('click', () => { $('search').value = ''; render(); });
+  back.addEventListener('click', () => {
+    if (inDialog) { $('detailDlg').close(); return; }
+    $('search').value = '';
+    render();
+  });
   const edit = el('button', 'btn primary', 'Edit');
   edit.type = 'button';
   edit.setAttribute('aria-label', `Edit ${it.name}`);
-  edit.addEventListener('click', () => openItem(it));
+  edit.addEventListener('click', () => {
+    if (inDialog) $('detailDlg').close();
+    openItem(it);
+  });
   actions.append(back, edit);
-  li.append(actions);
+  card.append(actions);
+  return card;
+}
+
+function openDetails(it) {
+  detailId = it.id;
+  $('detailBody').replaceChildren(detailCard(it, true));
+  if (!$('detailDlg').open) $('detailDlg').showModal();
+}
+
+function itemRow(it) {
+  const li = el('li', 'item');
+
+  const main = el('button', 'item-main');
+  main.type = 'button';
+  main.setAttribute('aria-label', `View details of ${it.name}`);
+  main.append(thumbFor(it));
+  const text = el('div', 'item-text');
+  text.append(el('div', 'item-name', it.name));
+  const sub = el('div', 'item-sub');
+  sub.append(el('span', 'item-price', money.format(it.price)));
+  const badge = stockBadge(it);
+  if (badge) sub.append(badge);
+  text.append(sub);
+  const meta = it.description || (it.barcode ? `Barcode ${it.barcode}` : '');
+  if (meta) text.append(el('div', 'item-meta', meta));
+  main.append(text);
+  main.addEventListener('click', () => openDetails(it));
+
+  li.append(main, qtyControls(it));
   return li;
 }
 
 function render() {
-  const q = $('search').value.trim().toLowerCase();
+  const raw = $('search').value.trim();
+  const q = raw.toLowerCase();
   const shown = items
     .filter((it) => !q || [it.name, it.description, it.barcode].some((f) => (f || '').toLowerCase().includes(q)))
+    .filter((it) => (stockFilter === 'low' ? isLow(it) : stockFilter === 'out' ? isOut(it) : true))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const list = $('list');
   list.replaceChildren();
-  // A search that narrows down to one item shows everything about it.
-  const single = q && shown.length === 1 ? shown[0] : null;
-  if (single) list.append(detailCard(single));
-  for (const it of single ? [] : shown) {
-    const li = el('li', 'item');
-
-    const main = el('button', 'item-main');
-    main.type = 'button';
-    main.setAttribute('aria-label', `Edit ${it.name}`);
-    if (photos.has(it.id)) {
-      const thumb = el('img', 'item-thumb');
-      thumb.src = photos.get(it.id);
-      thumb.alt = '';
-      main.append(thumb);
-    }
-    const text = el('div', 'item-text');
-    text.append(el('div', 'item-name', it.name));
-    if (it.description) text.append(el('div', 'item-desc', it.description));
-    text.append(el('div', 'item-price', money.format(it.price)));
-    if (it.barcode) text.append(el('div', 'item-meta', `Barcode ${it.barcode}`));
-    main.append(text);
-    main.addEventListener('click', () => openItem(it));
-
-    const qty = qtyControls(it);
-
-    li.append(main, qty);
-    list.append(li);
+  if (!loaded) {
+    for (let i = 0; i < 4; i++) list.append(el('li', 'skeleton'));
+  } else if (q && shown.length === 1) {
+    // A search that narrows down to one item shows everything about it.
+    list.append(detailCard(shown[0], false));
+  } else {
+    for (const it of shown) list.append(itemRow(it));
   }
+  list.setAttribute('aria-busy', String(!loaded));
+
+  // Totals and filter chips always describe the whole inventory.
+  const ready = loaded;
+  $('statItems').textContent = ready ? String(items.length) : '–';
+  $('statUnits').textContent = ready ? String(items.reduce((sum, it) => sum + it.qty, 0)) : '–';
+  $('statValue').textContent = ready ? money.format(items.reduce((sum, it) => sum + it.price * it.qty, 0)) : '–';
+  $('countAll').textContent = ready ? String(items.length) : '';
+  $('countLow').textContent = ready ? String(items.filter(isLow).length) : '';
+  $('countOut').textContent = ready ? String(items.filter(isOut).length) : '';
+  for (const chip of document.querySelectorAll('.chip')) chip.setAttribute('aria-pressed', String(chip.dataset.filter === stockFilter));
+
+  const filtering = Boolean(q) || stockFilter !== 'all';
+  $('summary').textContent = loaded && filtering && items.length
+    ? `Showing ${shown.length} of ${items.length} item${items.length === 1 ? '' : 's'}`
+    : '';
 
   $('empty').hidden = !loaded || items.length > 0;
-  const noResults = items.length > 0 && shown.length === 0;
+  const noResults = loaded && items.length > 0 && shown.length === 0;
   $('noResults').hidden = !noResults;
   if (noResults) {
-    const raw = $('search').value.trim();
-    $('noResultsText').textContent = raw === scannedQuery ? `No item has barcode ${raw}.` : `No item matches "${raw}".`;
+    $('noResultsText').textContent = !q
+      ? (stockFilter === 'low' ? 'No items are low on stock.' : 'No items are out of stock.')
+      : raw === scannedQuery ? `No item has barcode ${raw}.` : `No item matches "${raw}".`;
+    $('noResultsAdd').hidden = !q;
   }
-  const total = items.reduce((sum, it) => sum + it.price * it.qty, 0);
-  $('summary').textContent = items.length
-    ? `${shown.length === items.length ? items.length : `${shown.length} of ${items.length}`} item${items.length === 1 ? '' : 's'} · total value ${money.format(total)}`
-    : '';
+
+  // Keep an open details dialog in step with the data.
+  if ($('detailDlg').open) {
+    const it = items.find((x) => x.id === detailId);
+    if (it) $('detailBody').replaceChildren(detailCard(it, true)); else $('detailDlg').close();
+  }
+}
+
+for (const chip of document.querySelectorAll('.chip')) {
+  chip.addEventListener('click', () => { stockFilter = chip.dataset.filter; render(); });
+}
+
+/** Asks a yes/no question in the app's own dialog; resolves to true for yes. */
+function confirmDialog({ title, text, ok, danger }) {
+  return new Promise((resolve) => {
+    const dlg = $('confirmDlg');
+    $('confirmTitle').textContent = title;
+    $('confirmText').textContent = text;
+    $('confirmOk').textContent = ok;
+    $('confirmOk').className = danger ? 'btn danger solid' : 'btn primary';
+    let answer = false;
+    const onOk = () => { answer = true; dlg.close(); };
+    const onCancel = () => dlg.close();
+    const onClose = () => {
+      $('confirmOk').removeEventListener('click', onOk);
+      $('confirmCancel').removeEventListener('click', onCancel);
+      dlg.removeEventListener('close', onClose);
+      resolve(answer);
+    };
+    $('confirmOk').addEventListener('click', onOk);
+    $('confirmCancel').addEventListener('click', onCancel);
+    dlg.addEventListener('close', onClose);
+    dlg.showModal();
+  });
 }
 
 const qtyPending = new Map(); // item id -> number of +/- taps still being saved
@@ -401,11 +500,13 @@ function openItem(item, presetBarcode) {
   $('fDelete').hidden = !item;
   $('formError').hidden = true;
   $('itemDlg').showModal();
-  if (!item) $(presetBarcode ? 'fName' : 'fBarcode').focus();
+  // Adding starts typing straight away; editing does not pop the keyboard up.
+  $(item ? 'itemTitle' : 'fName').focus();
 }
 
 function setFormBusy(busy) {
   for (const b of $('itemForm').querySelectorAll('button')) b.disabled = busy;
+  $('fSave').textContent = busy ? 'Saving…' : 'Save';
 }
 
 function showFormError(msg, field) {
@@ -482,7 +583,14 @@ $('fCancel').addEventListener('click', () => $('itemDlg').close());
 
 $('fDelete').addEventListener('click', async () => {
   const it = items.find((x) => x.id === editingId);
-  if (!it || !confirm(`Delete "${it.name}" for everyone? This cannot be undone.`)) return;
+  if (!it) return;
+  const yes = await confirmDialog({
+    title: `Delete "${it.name}"?`,
+    text: 'It will be removed for everyone who uses this inventory. This cannot be undone.',
+    ok: 'Delete',
+    danger: true,
+  });
+  if (!yes) return;
   setFormBusy(true);
   try {
     const { error } = await sb.from('items').delete().eq('id', it.id);
@@ -510,6 +618,7 @@ BarcodeDetectionAPI.prepareZXingModule({
 const BARCODE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'code_93', 'itf', 'codabar', 'qr_code', 'data_matrix'];
 
 let scanSession = null; // { stream, timer }
+let scanCallback = null; // what to do with the barcode once we have one
 
 function stopScanner() {
   const s = scanSession;
@@ -518,6 +627,7 @@ function stopScanner() {
   clearTimeout(s.timer);
   if (s.stream) s.stream.getTracks().forEach((t) => t.stop());
   $('scanVideo').srcObject = null;
+  $('torchBtn').hidden = true;
 }
 
 async function openScanner(onCode) {
@@ -526,6 +636,8 @@ async function openScanner(onCode) {
   const video = $('scanVideo');
   err.hidden = true;
   stopScanner();
+  scanCallback = onCode;
+  $('scanManualInput').value = '';
   dlg.showModal();
 
   const session = { stream: null, timer: 0 };
@@ -541,6 +653,7 @@ async function openScanner(onCode) {
     session.stream = stream;
     video.srcObject = stream;
     await video.play();
+    setUpTorch(stream);
   } catch (e) {
     if (scanSession !== session) return;
     stopScanner();
@@ -551,6 +664,7 @@ async function openScanner(onCode) {
         ? 'The camera only works over a secure (https) connection.'
         : 'Could not start the camera on this device. You can still type the barcode in manually.';
     err.hidden = false;
+    $('scanManualInput').focus();
     return;
   }
 
@@ -567,8 +681,7 @@ async function openScanner(onCode) {
     if (scanSession !== session) return;
     if (code) {
       if (navigator.vibrate) navigator.vibrate(60);
-      dlg.close(); // the close handler stops the camera
-      onCode(code);
+      finishScan(code);
     } else {
       session.timer = setTimeout(tick, 120);
     }
@@ -576,15 +689,49 @@ async function openScanner(onCode) {
   tick();
 }
 
+function finishScan(code) {
+  const cb = scanCallback;
+  $('scanDlg').close(); // the close handler stops the camera
+  if (cb) cb(code);
+}
+
+/** Shows the Light button on phones whose camera lets the page switch the flash on. */
+function setUpTorch(stream) {
+  const btn = $('torchBtn');
+  btn.hidden = true;
+  btn.setAttribute('aria-pressed', 'false');
+  try {
+    const track = stream.getVideoTracks()[0];
+    const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+    if (!caps.torch) return;
+    btn.hidden = false;
+    btn.onclick = async () => {
+      const on = btn.getAttribute('aria-pressed') !== 'true';
+      try {
+        await track.applyConstraints({ advanced: [{ torch: on }] });
+        btn.setAttribute('aria-pressed', String(on));
+      } catch {
+        btn.hidden = true;
+      }
+    };
+  } catch { /* no flash control on this device */ }
+}
+
+// Typing the barcode works when the camera cannot read it (or is not allowed).
+$('scanManual').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const code = $('scanManualInput').value.trim();
+  if (code) finishScan(code);
+});
+
 $('scanCancel').addEventListener('click', () => $('scanDlg').close());
-$('scanDlg').addEventListener('close', stopScanner);
+$('scanDlg').addEventListener('close', () => { stopScanner(); scanCallback = null; });
 
 $('scanBtn').addEventListener('click', () =>
   openScanner((code) => {
     const found = items.find((x) => x.barcode === code);
     if (found) {
-      toast(`Found: ${found.name}`);
-      openItem(found);
+      openDetails(found);
     } else {
       toast('New barcode — add the item details');
       openItem(null, code);
@@ -777,12 +924,17 @@ async function runLegacyUpload() {
   }
 }
 
-function offerLegacyUpload() {
+async function offerLegacyUpload() {
   const n = legacyItems().length;
   const askedKey = `${LEGACY_KEY}.asked`;
   if (!n || localStorage.getItem(askedKey)) return;
   localStorage.setItem(askedKey, '1');
-  if (confirm(`This device has ${n} item${n === 1 ? '' : 's'} saved from before the inventory was shared. Upload ${n === 1 ? 'it' : 'them'} to the shared inventory now?\n\nYou can also do this later under Backup.`)) runLegacyUpload();
+  const yes = await confirmDialog({
+    title: 'Upload items saved on this device?',
+    text: `This device has ${n} item${n === 1 ? '' : 's'} saved from before the inventory was shared. You can also upload ${n === 1 ? 'it' : 'them'} later under Backup.`,
+    ok: 'Upload',
+  });
+  if (yes) runLegacyUpload();
 }
 
 $('legacyBtn').addEventListener('click', async () => {

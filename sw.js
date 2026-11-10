@@ -1,6 +1,6 @@
 // Offline support: try the network first so updates show up immediately,
 // fall back to the cached copy when there is no connection.
-const CACHE = 'inventory-v4';
+const CACHE = 'inventory-v5';
 const ASSETS = [
   './',
   'index.html',

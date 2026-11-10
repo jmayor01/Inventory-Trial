@@ -7,11 +7,16 @@ Android and iOS with nothing to install from an app store.
 
 ## What it does
 
-- **Scan barcode** — opens the camera. A known barcode opens that item; a new
-  one starts a new item with the barcode filled in.
-- **Add / edit / delete** items: barcode, name, description, price, quantity,
+- **Scan barcode** — opens the camera. A known barcode shows that item's
+  details; a new one starts a new item with the barcode filled in. The barcode
+  can also be typed in, and phones that allow it get a **Light** button.
+- **Add / edit / delete** items: name, barcode, price, quantity, description
   and an optional photo taken with the camera or picked from the gallery.
-- **+ / −** buttons to adjust stock straight from the list.
+- **Item details** — tap an item to see its photo and every field, then
+  **Edit** from there.
+- **+ / −** buttons to adjust stock straight from the list or the details.
+- **Totals and stock filters** — number of items, units and stock value at the
+  top; **Low stock** (5 units or fewer) and **Out of stock** filters and badges.
 - **Search** by name, description or barcode (typed or scanned). When the
   search matches a single item, its full details and large photo are shown.
 - **Shared** — items and photos are stored online; a change made on one phone
@@ -20,6 +25,7 @@ Android and iOS with nothing to install from an app store.
   import it again. Photos are not part of the CSV.
 - Can be added to the home screen like an app. Without a connection it shows
   the last copy it loaded; adding and changing items needs to be online.
+- Light and dark mode follow the phone's setting.
 
 Supported codes: EAN-13, EAN-8, UPC-A, UPC-E, Code 128, Code 39, Code 93, ITF,
 Codabar, QR and Data Matrix.
