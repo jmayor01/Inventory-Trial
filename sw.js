@@ -1,13 +1,15 @@
 // Offline support: try the network first so updates show up immediately,
 // fall back to the cached copy when there is no connection.
-const CACHE = 'inventory-v1';
+const CACHE = 'inventory-v2';
 const ASSETS = [
   './',
   'index.html',
   'styles.css',
   'app.js',
+  'config.js',
   'vendor/barcode-detector.js',
   'vendor/zxing_reader.wasm',
+  'vendor/supabase.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

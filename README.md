@@ -1,8 +1,9 @@
 # Inventory
 
 A simple inventory app for phones. Add items with a description, price and
-quantity, and use the phone's camera to scan barcodes. It is a web app, so the
-same code runs on Android and iOS with nothing to install from an app store.
+quantity, and use the phone's camera to scan barcodes. Everyone who signs in
+sees the same shared inventory. It is a web app, so the same code runs on
+Android and iOS with nothing to install from an app store.
 
 ## What it does
 
@@ -12,20 +13,42 @@ same code runs on Android and iOS with nothing to install from an app store.
   and an optional photo taken with the camera or picked from the gallery.
 - **+ / −** buttons to adjust stock straight from the list.
 - **Search** by name, description or barcode; the header shows the total stock value.
+- **Shared** — items and photos are stored online; a change made on one phone
+  shows up on the others. Users sign in with an email and password.
 - **Backup** — export everything to CSV (opens in Excel / Google Sheets) and
-  import it again, on this or another device. Photos are not part of the CSV.
-- Works offline once opened, and can be added to the home screen like an app.
+  import it again. Photos are not part of the CSV.
+- Can be added to the home screen like an app. Without a connection it shows
+  the last copy it loaded; adding and changing items needs to be online.
 
 Supported codes: EAN-13, EAN-8, UPC-A, UPC-E, Code 128, Code 39, Code 93, ITF,
 Codabar, QR and Data Matrix.
 
 ## Where the data lives
 
-Items are stored **on the device, in the browser** — there is no server and no
-account. That keeps it free and simple, but it means each phone has its own
-list, and clearing the browser's site data deletes it. Use **Backup → Export
-CSV** regularly. On iPhone, add the app to the home screen so iOS does not
-clear data for sites that have not been visited for a while.
+Items and photos are stored in a [Supabase](https://supabase.com) database
+(the project is set in `config.js`). Only signed-in users can read or change
+them; this is enforced by the database rules in `supabase/setup.sql`, not just
+by the app. Each device keeps a copy of the list for offline viewing, which is
+removed when the user signs out.
+
+## Set up Supabase (once)
+
+1. **Create the tables.** In the Supabase dashboard open **SQL Editor**, paste
+   the whole of [`supabase/setup.sql`](supabase/setup.sql) and press **Run**.
+2. **Turn off public sign-ups**, so that only people you add can get in:
+   **Authentication → Sign In / Providers → Allow new users to sign up → off**.
+   Without this step anyone who has the app link could create an account for
+   themselves.
+3. **Add your users.** **Authentication → Users → Add user → Create new user**:
+   enter an email and password and keep **Auto Confirm User** ticked. Give each
+   person their email and password. The app has no sign-up screen on purpose.
+
+To use a different Supabase project, change the two values in `config.js` (the
+*publishable* key only — never a secret key) and repeat the steps above.
+
+Items that were saved on a phone before the inventory became shared are not
+lost: after signing in on that phone the app offers to upload them, and the
+same option stays available under **Menu**.
 
 ## Deploy
 
@@ -63,5 +86,7 @@ it from a phone over plain `http://<ip>` will not — use a deployed https link.
 | File | Purpose |
 | --- | --- |
 | `index.html`, `styles.css`, `app.js` | The whole app |
+| `config.js` | Which Supabase project to use |
+| `supabase/setup.sql` | Database tables and access rules |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and home-screen install |
-| `vendor/` | Barcode reader ([barcode-detector](https://github.com/Sec-ant/barcode-detector) + ZXing WebAssembly, MIT) |
+| `vendor/` | Barcode reader ([barcode-detector](https://github.com/Sec-ant/barcode-detector) + ZXing WebAssembly) and the Supabase client, all MIT |

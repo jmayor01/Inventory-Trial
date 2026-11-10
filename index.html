@@ -13,13 +13,27 @@
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body data-view="boot">
   <header class="topbar">
     <h1>Inventory</h1>
-    <button id="menuBtn" class="btn ghost" aria-haspopup="dialog">Backup</button>
+    <button id="menuBtn" class="btn ghost" aria-haspopup="dialog">Menu</button>
   </header>
 
+  <section id="loginView" class="login" aria-labelledby="loginTitle">
+    <form id="loginForm">
+      <h2 id="loginTitle">Sign in</h2>
+      <p class="hint">Sign in to view and update the shared inventory.</p>
+      <label for="lEmail">Email</label>
+      <input id="lEmail" type="email" autocomplete="username" autocapitalize="off" required>
+      <label for="lPassword">Password</label>
+      <input id="lPassword" type="password" autocomplete="current-password" required>
+      <p id="loginError" class="error" role="alert" hidden></p>
+      <button id="loginBtn" type="submit" class="btn primary">Sign in</button>
+    </form>
+  </section>
+
   <main>
+    <p id="status" class="status" role="status" hidden></p>
     <div class="searchrow">
       <label class="sr-only" for="search">Search items</label>
       <input id="search" type="search" placeholder="Search name or barcode" autocomplete="off">
@@ -101,13 +115,19 @@
     </div>
   </dialog>
 
-  <!-- Backup -->
+  <!-- Menu: account and backup -->
   <dialog id="menuDlg" aria-labelledby="menuTitle">
-    <h2 id="menuTitle">Backup</h2>
-    <p class="hint">Items are stored on this device. Export a CSV file to back them up, open them in Excel or Google Sheets, or move them to another device. Photos are not included in the CSV file.</p>
+    <h2 id="menuTitle">Menu</h2>
+    <p class="hint">Signed in as <strong id="accountEmail"></strong></p>
+    <div class="stack">
+      <button type="button" id="signOutBtn" class="btn">Sign out</button>
+    </div>
+    <h3>Backup</h3>
+    <p class="hint">The inventory is stored online and shared by everyone who signs in. Export a CSV file to keep your own copy or open it in Excel or Google Sheets. Photos are not included in the CSV file.</p>
     <div class="stack">
       <button type="button" id="exportBtn" class="btn">Export CSV</button>
       <button type="button" id="importBtn" class="btn">Import CSV</button>
+      <button type="button" id="legacyBtn" class="btn" hidden></button>
       <input id="importFile" type="file" accept=".csv,text/csv" hidden>
     </div>
     <p id="menuMsg" class="hint" role="status"></p>
@@ -120,6 +140,8 @@
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="vendor/barcode-detector.js"></script>
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

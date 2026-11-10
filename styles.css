@@ -75,6 +75,24 @@ textarea { resize: vertical; }
 .searchrow { display: flex; gap: 8px; }
 .searchrow input { flex: 1; min-width: 0; }
 
+/* Which screen is showing: "boot" (checking sign-in), "login" or "app". */
+body:not([data-view="app"]) main,
+body:not([data-view="app"]) .actions,
+body:not([data-view="app"]) #menuBtn,
+body:not([data-view="login"]) .login { display: none; }
+
+.login { max-width: 420px; margin: 0 auto; padding: 32px 16px; }
+.login h2 { font-size: 1.25rem; margin-bottom: 6px; }
+.login .btn { width: 100%; margin-top: 18px; }
+
+.status {
+  margin-bottom: 10px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--muted); font-size: .9rem;
+}
+dialog h3 { font-size: 1rem; margin: 20px 0 6px; }
+.btn:disabled { opacity: .55; cursor: default; }
+
 .summary { color: var(--muted); font-size: .9rem; margin: 10px 2px; }
 
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
