@@ -30,7 +30,7 @@
   <section id="loginView" class="login" aria-labelledby="loginTitle">
     <form id="loginForm">
       <h2 id="loginTitle">Sign in to the back office</h2>
-      <p class="hint">Product costs and profit are only shown to signed-in users.</p>
+      <p class="hint">Original prices and profit are only shown to signed-in users.</p>
       <label for="lEmail">Email</label>
       <input id="lEmail" type="email" autocomplete="username" autocapitalize="off" required>
       <label for="lPassword">Password</label>
@@ -49,10 +49,10 @@
         <span class="stat-label">Expected profit</span>
       </div>
       <div class="stat"><span class="stat-value" id="statMargin">–</span><span class="stat-label">Margin</span></div>
-      <div class="stat"><span class="stat-value" id="statValue">–</span><span class="stat-label">Stock at selling price</span></div>
-      <div class="stat"><span class="stat-value" id="statCost">–</span><span class="stat-label">Stock at cost</span></div>
+      <div class="stat"><span class="stat-value" id="statValue">–</span><span class="stat-label">Stock at market price</span></div>
+      <div class="stat"><span class="stat-value" id="statCost">–</span><span class="stat-label">Stock at original price</span></div>
     </section>
-    <p class="hint profit-note">Expected profit is what you earn if all current stock sells at its selling price. <span id="missingNote"></span></p>
+    <p class="hint profit-note">Expected profit is what you earn if all current stock sells at its market price. <span id="missingNote"></span></p>
 
     <div class="toolbar">
       <div class="searchbox">
@@ -76,7 +76,7 @@
 
     <div class="chips" role="group" aria-label="Filter products">
       <button type="button" class="chip" data-filter="all" aria-pressed="true">All <span id="countAll" class="chip-count"></span></button>
-      <button type="button" class="chip" data-filter="nocost" aria-pressed="false">No cost price <span id="countNoCost" class="chip-count"></span></button>
+      <button type="button" class="chip" data-filter="nocost" aria-pressed="false">No original price <span id="countNoCost" class="chip-count"></span></button>
       <button type="button" class="chip" data-filter="loss" aria-pressed="false">Selling at a loss <span id="countLoss" class="chip-count"></span></button>
     </div>
 
@@ -106,11 +106,11 @@
 
       <div class="two">
         <div>
-          <label for="fCost">Cost price</label>
+          <label for="fCost">Original price</label>
           <input id="fCost" name="cost" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" aria-describedby="fProfit">
         </div>
         <div>
-          <label for="fPrice">Selling price</label>
+          <label for="fPrice">Market price</label>
           <input id="fPrice" name="price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" aria-describedby="fProfit">
         </div>
       </div>

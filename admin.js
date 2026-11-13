@@ -1,6 +1,8 @@
 'use strict';
 
-// The back office: sign-in, product management with cost prices, and profit.
+// The back office: sign-in, product management with original and market
+// prices, and profit. "Original price" is what the product cost to buy (stored
+// as `cost`); "market price" is what it sells for (the item's `price`).
 // Shared helpers (photos, scanner, form bits) are in common.js.
 //
 // Cost prices live in the item_costs table, which only signed-in users can
@@ -94,7 +96,7 @@ function productRow(it) {
   const text = el('div', 'item-text');
   text.append(el('div', 'item-name', it.name));
   const sub = el('div', 'item-sub');
-  if (!hasCost(it)) sub.append(el('span', 'badge low', 'No cost price'));
+  if (!hasCost(it)) sub.append(el('span', 'badge low', 'No original price'));
   else if (isLoss(it)) sub.append(el('span', 'badge out', 'Selling at a loss'));
   if (it.qty <= 0) sub.append(el('span', 'badge out', 'Out of stock'));
   if (sub.childNodes.length) text.append(sub);
@@ -106,8 +108,8 @@ function productRow(it) {
   const sp = stockProfit(it);
   const figures = el('dl', 'figures');
   figures.append(
-    figure('Cost', hasCost(it) ? money.format(it.cost) : '—'),
-    figure('Price', money.format(it.price)),
+    figure('Original', hasCost(it) ? money.format(it.cost) : '—'),
+    figure('Market', money.format(it.price)),
     figure('Profit / unit', up == null ? '—' : signed(up), up != null && up < 0 ? 'neg' : ''),
     figure('Margin', m == null ? '—' : percent(m), m != null && m < 0 ? 'neg' : ''),
     figure('Stock', String(it.qty)),
@@ -158,7 +160,7 @@ function render() {
   $('statValue').textContent = loaded ? money.format(stockValue) : '–';
   $('statCost').textContent = show ? money.format(stockCost) : '–';
   $('missingNote').textContent = loaded && missing
-    ? `${missing} product${missing === 1 ? ' has' : 's have'} no cost price yet and ${missing === 1 ? 'is' : 'are'} left out of the profit, margin and cost figures.`
+    ? `${missing} product${missing === 1 ? ' has' : 's have'} no original price yet and ${missing === 1 ? 'is' : 'are'} left out of the profit, margin and original-price figures.`
     : '';
 
   $('countAll').textContent = loaded ? String(items.length) : '';
@@ -175,7 +177,7 @@ function render() {
   $('noResults').hidden = !noResults;
   if (noResults) {
     $('noResultsText').textContent = q ? `No product matches "${raw}".`
-      : filter === 'nocost' ? 'Every product has a cost price.' : 'No product is selling at a loss.';
+      : filter === 'nocost' ? 'Every product has an original price.' : 'No product is selling at a loss.';
   }
 }
 
@@ -194,7 +196,7 @@ function showProfitPreview() {
   const priceText = $('fPrice').value.trim();
   out.replaceChildren();
   if (!costText || !priceText) {
-    out.textContent = costText ? '' : 'Enter the cost price to see the profit.';
+    out.textContent = costText ? '' : 'Enter the original price to see the profit.';
     return;
   }
   const cost = toNumber(costText);
@@ -268,7 +270,7 @@ $('itemForm').addEventListener('submit', async (e) => {
     try {
       saved.cost = await saveCost(saved.id, costText);
     } catch {
-      problems.push('cost price');
+      problems.push('original price');
     }
     if (formPhoto !== formPhotoOriginal) {
       try {
@@ -316,7 +318,7 @@ $('fDelete').addEventListener('click', async () => {
 // ---------- Export ----------
 
 $('exportBtn').addEventListener('click', () => {
-  const header = ['barcode', 'name', 'description', 'cost', 'price', 'profit_per_unit', 'margin_percent', 'qty', 'expected_profit'];
+  const header = ['barcode', 'name', 'description', 'original_price', 'market_price', 'profit_per_unit', 'margin_percent', 'qty', 'expected_profit'];
   const num = (v) => (v == null ? '' : v.toFixed(2));
   const lines = [header.join(',')];
   for (const it of [...items].sort(SORTS.name)) {
