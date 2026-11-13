@@ -106,6 +106,29 @@ textarea { resize: vertical; }
 .btn.square { width: 48px; padding: 0; flex: none; }
 .btn:disabled { opacity: .55; cursor: default; }
 
+/* ---------- What each kind of visitor sees ----------
+   body[data-mode] is "public" (barcode lookup only), "viewer" (list unlocked
+   with a passcode), "staff" (signed in) or "boot" (still working it out).
+   An element with data-show is only visible in the modes it lists. */
+body[data-mode="boot"] [data-show],
+body[data-mode="public"] [data-show]:not([data-show~="public"]),
+body[data-mode="viewer"] [data-show]:not([data-show~="viewer"]),
+body[data-mode="staff"] [data-show]:not([data-show~="staff"]) { display: none !important; }
+
+.unlock {
+  margin-top: 16px; padding: 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.unlock label { margin-top: 0; }
+.unlock .inline { margin-top: 10px; }
+.qty-text { flex: none; text-align: right; padding: 0 8px; }
+.qty-text strong { display: block; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.qty-text span { color: var(--muted); font-size: .75rem; }
+.btn.link {
+  min-height: 36px; padding: 0; margin-top: 4px; border: 0; background: none;
+  color: var(--primary); font-weight: 600; font-size: .9rem;
+}
+
 /* ---------- Install prompt ---------- */
 .install {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
@@ -327,8 +350,39 @@ label, .label { display: block; font-size: .9rem; font-weight: 600; margin: 14px
 body.admin { padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
 body.admin main { max-width: 960px; }
 body.admin:not([data-view="app"]) main,
-body.admin:not([data-view="app"]) #signOutBtn,
-body.admin:not([data-view="login"]) .login { display: none; }
+body.admin[data-view="boot"] #signOutBtn,
+body.admin[data-view="login"] #signOutBtn,
+body.admin:not([data-view="login"]) #loginView,
+body.admin:not([data-view="norole"]) #noRoleView { display: none; }
+/* Parts only the super admin sees. */
+body.admin:not([data-role="super_admin"]) [data-role="super_admin"] { display: none !important; }
+
+.whoami { margin-bottom: 10px; }
+.tabs { display: flex; gap: 4px; padding: 4px; margin-bottom: 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; }
+.tab {
+  flex: 1; font: inherit; font-weight: 600; color: var(--muted);
+  background: none; border: 0; border-radius: 10px; min-height: 42px; cursor: pointer;
+}
+.tab[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.section-title { font-size: 1.2rem; margin-bottom: 6px; }
+.list.plain { margin-top: 14px; }
+.row-card {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow);
+}
+.row-card .row-main { flex: 1 1 180px; min-width: 0; }
+.row-card .row-title { font-weight: 600; overflow-wrap: anywhere; }
+.row-card .row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row-card .btn, .row-card select { min-height: 42px; }
+.code-value { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 1.15rem; font-weight: 700; letter-spacing: .08em; }
+.card-form {
+  margin-top: 16px; padding: 14px; max-width: 520px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.card-form h3 { font-size: 1rem; margin: 0; }
+.card-form .btn.primary { margin-top: 16px; width: 100%; }
+.card-form select { width: 100%; }
 .topbar-links { display: flex; align-items: center; gap: 4px; }
 a.btn { text-decoration: none; }
 
@@ -371,6 +425,7 @@ select {
 .product-head .item-text { flex: 1; min-width: 0; }
 .figures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 12px; margin: 12px 0 0; }
 .figures div { min-width: 0; }
+.figures.few { grid-template-columns: repeat(2, 1fr); }
 .figures dt { color: var(--muted); font-size: .75rem; }
 .figures dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (min-width: 720px) {

@@ -1,8 +1,8 @@
 # Inventory
 
 A simple inventory app for phones. Add items with a description, price and
-quantity, and use the phone's camera to scan barcodes. Everyone who opens the
-app sees the same shared inventory; there is no login. It is a web app, so the same code runs on
+quantity, and use the phone's camera to scan barcodes. The inventory is shared
+online, with roles deciding who can see and change what. It is a web app, so the same code runs on
 Android and iOS with nothing to install from an app store.
 
 ## What it does
@@ -30,50 +30,61 @@ Android and iOS with nothing to install from an app store.
 Supported codes: EAN-13, EAN-8, UPC-A, UPC-E, Code 128, Code 39, Code 93, ITF,
 Codabar, QR and Data Matrix.
 
+## Who can do what
+
+| Visitor | Can do |
+| --- | --- |
+| Anyone with the link | Look up one product by scanning or typing its exact barcode, and see its details |
+| With a passcode | Also view and search the whole list of items (read-only) |
+| **Admin** (signed in) | Add, change and delete items, change stock, generate barcodes, import and export CSV |
+| **Super admin** (signed in) | Everything an admin can, plus original prices and profit, user accounts and passcodes |
+
+These rules are enforced by the database (`supabase/setup.sql`), not only by
+the app, so they hold even for someone who talks to the database directly.
+
 ## Back office
 
-Open **Menu → Back office**, or go to `/admin.html`. It needs a login.
+Open **Menu → Staff sign in**, or go to `/admin.html`.
 
-- **Add, edit and delete products**, with an **original price** (what it cost
-  you) and a **market price** (what it sells for). The form shows the profit
-  per unit while you type.
-- **Profit at a glance** — expected profit, overall margin, and the stock valued
-  at market price and at original price. *Expected profit* is what you earn if
-  all current stock sells at its market price; the app does not record sales.
-- Per product: original price, market price, profit per unit, margin, stock and expected profit,
-  with sorting, search, and filters for products with no original price or
-  selling at a loss.
-- **Export CSV** including original price and profit.
+- **Products** — add, edit and delete. **No barcode? Generate one** makes up a
+  valid EAN-13 starting with 2 (the range reserved for a shop's own codes).
+- **Profit** (super admin) — each product has an **original price** (what it
+  cost you) and a **market price** (what it sells for). The page shows expected
+  profit, margin, and the stock valued at both prices. *Expected profit* is what
+  you earn if all current stock sells at its market price; sales are not recorded.
+- **Users** (super admin) — create admin or super admin accounts, change a
+  role, remove an account.
+- **Passcodes** (super admin) — create and delete the codes that let people
+  without an account view the list of items.
+- **Export CSV** — with original price and profit columns for the super admin.
 
-Original prices are stored in their own table that only signed-in users can read,
-so they never appear in the inventory app. Back-office users are the accounts
-under **Authentication → Users** in Supabase; keep **Allow new users to sign
-up** switched off there so nobody can create an account for themselves.
+Once signed in, the inventory app itself also unlocks adding, editing, stock
++/− and CSV import/export.
 
 ## Where the data lives
 
-Items and photos are stored in a [Supabase](https://supabase.com) database
-(the project is set in `config.js`). Each device also keeps a copy of the list
-for offline viewing.
-
-**The inventory app has no login.** Anyone who has the app link can view, change
-and delete every item and photo (but not original prices or profit), and there is no record of who did what. Share the link
-only with people you trust, and use **Backup → Export CSV** regularly so the
-list can be restored if something is deleted.
+Items, photos, original prices, roles and passcodes are stored in a
+[Supabase](https://supabase.com) database (the project is set in `config.js`).
+A signed-in or passcode-holding device keeps a copy of the list for offline
+viewing; it is removed on sign-out or when the passcode is forgotten.
 
 ## Set up Supabase (once)
 
-In the Supabase dashboard open **SQL Editor**, paste the whole of
-[`supabase/setup.sql`](supabase/setup.sql) and press **Run**. It creates the
-tables and the rules that let the app use them. It is safe to run again, and
-it must be re-run whenever that file changes.
+1. **Database.** In the Supabase dashboard open **SQL Editor**, paste the whole
+   of [`supabase/setup.sql`](supabase/setup.sql) and press **Run**. It is safe
+   to run again and must be re-run whenever that file changes. If the project
+   has exactly one account and nobody has a role yet, that account becomes the
+   super admin; the end of the file shows how to pick one by hand.
+2. **Sign-ups off.** **Authentication → Sign In / Providers → Allow new users
+   to sign up → off**, so accounts can only be created by a super admin.
+3. **User management function.** Deploy
+   [`supabase/functions/manage-users`](supabase/functions/manage-users/index.ts)
+   as an Edge Function named `manage-users` with **Verify JWT** switched off
+   (it checks the caller itself). The **Users** screen needs it to create and
+   remove accounts; everything else works without it.
 
 To use a different Supabase project, change the two values in `config.js` (the
-*publishable* key only — never a secret key) and run the script there.
-
-Items that were saved on a phone before the inventory became shared are not
-lost: the app offers to upload them the first time it opens, and the same
-option stays available under **Backup**.
+*publishable* key only — never a secret key) and repeat the steps above.
 
 ## Deploy
 
@@ -121,5 +132,6 @@ it from a phone over plain `http://<ip>` will not — use a deployed https link.
 | `common.js`, `styles.css` | Code and styles both pages share |
 | `config.js` | Which Supabase project to use |
 | `supabase/setup.sql` | Database tables and access rules |
+| `supabase/functions/manage-users` | Server function that creates and removes accounts |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and home-screen install |
 | `vendor/` | Barcode reader ([barcode-detector](https://github.com/Sec-ant/barcode-detector) + ZXing WebAssembly) and the Supabase client, all MIT |

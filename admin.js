@@ -1,12 +1,14 @@
 'use strict';
 
-// The back office: sign-in, product management with original and market
-// prices, and profit. "Original price" is what the product cost to buy (stored
-// as `cost`); "market price" is what it sells for (the item's `price`).
-// Shared helpers (photos, scanner, form bits) are in common.js.
+// The back office. Needs a sign-in, and what it shows depends on the role:
+//   admin       - manage products (add, change, delete), export
+//   super admin - the same, plus original prices and profit, users, passcodes
+// The database enforces these rules (supabase/setup.sql); hiding things here
+// is only so that people are not shown buttons that would be refused.
 //
-// Cost prices live in the item_costs table, which only signed-in users can
-// read (see supabase/setup.sql). The inventory app never loads them.
+// "Original price" is what a product cost to buy (stored as `cost` in the
+// item_costs table); "market price" is what it sells for (the item's `price`).
+// Shared helpers (photos, scanner, form bits) are in common.js.
 
 const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INVENTORY_CONFIG.supabaseKey);
 
@@ -14,6 +16,8 @@ const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INV
 let items = [];
 let loaded = false;
 let userId = null;
+let role = null; // 'admin' | 'super_admin'
+const isSuper = () => role === 'super_admin';
 let filter = 'all'; // 'all' | 'nocost' | 'loss'
 let editingId = null;
 
@@ -50,7 +54,7 @@ async function refresh() {
   const forUser = userId;
   const [itemRows, costRows] = await Promise.all([
     fetchAll('items', ITEM_COLUMNS, 'id'),
-    fetchAll('item_costs', 'item_id,cost', 'item_id'),
+    isSuper() ? fetchAll('item_costs', 'item_id,cost', 'item_id') : [],
   ]);
   if (forUser !== userId) return; // signed out meanwhile
   const costs = new Map(costRows.map((r) => [r.item_id, Number(r.cost)]));
@@ -61,7 +65,7 @@ async function refresh() {
 }
 
 async function refreshQuietly() {
-  if (!userId) return;
+  if (!userId || !role) return;
   try {
     await refresh();
     setStatus('');
@@ -96,7 +100,7 @@ function productRow(it) {
   const text = el('div', 'item-text');
   text.append(el('div', 'item-name', it.name));
   const sub = el('div', 'item-sub');
-  if (!hasCost(it)) sub.append(el('span', 'badge low', 'No original price'));
+  if (isSuper() && !hasCost(it)) sub.append(el('span', 'badge low', 'No original price'));
   else if (isLoss(it)) sub.append(el('span', 'badge out', 'Selling at a loss'));
   if (it.qty <= 0) sub.append(el('span', 'badge out', 'Out of stock'));
   if (sub.childNodes.length) text.append(sub);
@@ -107,14 +111,19 @@ function productRow(it) {
   const m = margin(it);
   const sp = stockProfit(it);
   const figures = el('dl', 'figures');
-  figures.append(
-    figure('Original', hasCost(it) ? money.format(it.cost) : '—'),
-    figure('Market', money.format(it.price)),
-    figure('Profit / unit', up == null ? '—' : signed(up), up != null && up < 0 ? 'neg' : ''),
-    figure('Margin', m == null ? '—' : percent(m), m != null && m < 0 ? 'neg' : ''),
-    figure('Stock', String(it.qty)),
-    figure('Expected profit', sp == null ? '—' : signed(sp), sp != null && sp < 0 ? 'neg' : ''),
-  );
+  if (isSuper()) {
+    figures.append(
+      figure('Original', hasCost(it) ? money.format(it.cost) : '—'),
+      figure('Market', money.format(it.price)),
+      figure('Profit / unit', up == null ? '—' : signed(up), up != null && up < 0 ? 'neg' : ''),
+      figure('Margin', m == null ? '—' : percent(m), m != null && m < 0 ? 'neg' : ''),
+      figure('Stock', String(it.qty)),
+      figure('Expected profit', sp == null ? '—' : signed(sp), sp != null && sp < 0 ? 'neg' : ''),
+    );
+  } else {
+    figures.classList.add('few');
+    figures.append(figure('Price', money.format(it.price)), figure('Stock', String(it.qty)));
+  }
 
   row.append(head, figures);
   row.addEventListener('click', () => openItem(it));
@@ -132,6 +141,11 @@ const SORTS = {
 };
 
 function render() {
+  if (!isSuper()) {
+    // An admin has no profit-based sorting or filters.
+    filter = 'all';
+    if (!['name', 'stock'].includes($('sort').value)) $('sort').value = 'name';
+  }
   const raw = $('search').value.trim();
   const q = raw.toLowerCase();
   const shown = items
@@ -267,10 +281,12 @@ $('itemForm').addEventListener('submit', async (e) => {
     let saved = { ...fromRow(data), cost: before ? before.cost : null };
 
     const problems = [];
-    try {
-      saved.cost = await saveCost(saved.id, costText);
-    } catch {
-      problems.push('original price');
+    if (isSuper()) {
+      try {
+        saved.cost = await saveCost(saved.id, costText);
+      } catch {
+        problems.push('original price');
+      }
     }
     if (formPhoto !== formPhotoOriginal) {
       try {
@@ -318,20 +334,22 @@ $('fDelete').addEventListener('click', async () => {
 // ---------- Export ----------
 
 $('exportBtn').addEventListener('click', () => {
-  const header = ['barcode', 'name', 'description', 'original_price', 'market_price', 'profit_per_unit', 'margin_percent', 'qty', 'expected_profit'];
   const num = (v) => (v == null ? '' : v.toFixed(2));
+  const header = isSuper()
+    ? ['barcode', 'name', 'description', 'original_price', 'market_price', 'profit_per_unit', 'margin_percent', 'qty', 'expected_profit']
+    : ['barcode', 'name', 'description', 'price', 'qty'];
   const lines = [header.join(',')];
   for (const it of [...items].sort(SORTS.name)) {
     const m = margin(it);
-    lines.push([
-      it.barcode, it.name, it.description,
-      num(it.cost), num(it.price), num(unitProfit(it)), m == null ? '' : (m * 100).toFixed(1), it.qty, num(stockProfit(it)),
-    ].map(csvCell).join(','));
+    const cells = isSuper()
+      ? [it.barcode, it.name, it.description, num(it.cost), num(it.price), num(unitProfit(it)), m == null ? '' : (m * 100).toFixed(1), it.qty, num(stockProfit(it))]
+      : [it.barcode, it.name, it.description, num(it.price), it.qty];
+    lines.push(cells.map(csvCell).join(','));
   }
   const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `inventory-profit-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `inventory-${isSuper() ? 'profit-' : ''}${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.append(a);
   a.click();
   a.remove();
@@ -355,25 +373,231 @@ $('loginForm').addEventListener('submit', async (e) => {
   err.hidden = false;
 });
 
-$('signOutBtn').addEventListener('click', () => sb.auth.signOut({ scope: 'local' }));
+// ---------- Sections (super admin) ----------
+
+let currentTab = 'products';
+
+function showTab(name) {
+  currentTab = isSuper() ? name : 'products';
+  for (const tab of document.querySelectorAll('.tab')) tab.setAttribute('aria-selected', String(tab.dataset.tab === currentTab));
+  for (const panel of document.querySelectorAll('.tabpanel')) panel.hidden = panel.id !== `tab-${currentTab}`;
+  if (currentTab === 'users') loadUsers();
+  if (currentTab === 'codes') loadCodes();
+}
+for (const tab of document.querySelectorAll('.tab')) tab.addEventListener('click', () => showTab(tab.dataset.tab));
+
+function showError(id, message) {
+  $(id).textContent = message;
+  $(id).hidden = !message;
+}
+
+// ---------- Users (super admin) ----------
+
+const ROLE_NAMES = { admin: 'Admin', super_admin: 'Super admin' };
+
+/** Calls the manage-users server function, which holds the key needed to create accounts. */
+async function manageUsers(body) {
+  const { data, error } = await sb.functions.invoke('manage-users', { body });
+  if (!error) return data;
+  let message = '';
+  try {
+    message = (await error.context.json()).error || '';
+  } catch { /* no readable reply */ }
+  throw new Error(message || explain(error, 'The user service did not answer. Please try again.'));
+}
+
+async function loadUsers() {
+  const { data, error } = await sb.from('profiles').select('user_id,email,role,created_at').order('created_at');
+  if (error) { setStatus(explain(error, 'Could not load the users.')); return; }
+  const list = $('userList');
+  list.replaceChildren();
+  for (const u of data) {
+    const mine = u.user_id === userId;
+    const li = el('li', 'row-card');
+    const main = el('div', 'row-main');
+    main.append(el('div', 'row-title', u.email || '(no email)'), el('div', 'hint', mine ? `${ROLE_NAMES[u.role]} · you` : ROLE_NAMES[u.role]));
+    li.append(main);
+    if (!mine) {
+      const actions = el('div', 'row-actions');
+      const select = el('select');
+      select.setAttribute('aria-label', `Role of ${u.email}`);
+      for (const [value, name] of Object.entries(ROLE_NAMES)) {
+        const opt = el('option', '', name);
+        opt.value = value;
+        opt.selected = value === u.role;
+        select.append(opt);
+      }
+      select.addEventListener('change', async () => {
+        const { data: changed, error: e } = await sb.from('profiles').update({ role: select.value }).eq('user_id', u.user_id).select('user_id');
+        if (e || !changed.length) toast(explain(e, 'Could not change the role.'));
+        else toast(`${u.email} is now ${ROLE_NAMES[select.value].toLowerCase()}`);
+        loadUsers();
+      });
+      const remove = el('button', 'btn danger', 'Remove');
+      remove.type = 'button';
+      remove.setAttribute('aria-label', `Remove ${u.email}`);
+      remove.addEventListener('click', async () => {
+        const yes = await confirmDialog({
+          title: `Remove ${u.email}?`,
+          text: 'They will no longer be able to sign in. This cannot be undone.',
+          ok: 'Remove',
+          danger: true,
+        });
+        if (!yes) return;
+        remove.disabled = true;
+        try {
+          await manageUsers({ action: 'delete', user_id: u.user_id });
+          toast('User removed');
+        } catch (e) {
+          toast(e.message);
+        }
+        loadUsers();
+      });
+      actions.append(select, remove);
+      li.append(actions);
+    }
+    list.append(li);
+  }
+}
+
+$('userForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = $('uEmail').value.trim();
+  const password = $('uPassword').value;
+  showError('userError', '');
+  if (!/^\S+@\S+\.\S+$/.test(email)) { showError('userError', 'Enter a valid email address.'); $('uEmail').focus(); return; }
+  if (password.length < 8) { showError('userError', 'The password needs at least 8 characters.'); $('uPassword').focus(); return; }
+  $('userSave').disabled = true;
+  $('userSave').textContent = 'Creating…';
+  try {
+    await manageUsers({ action: 'create', email, password, role: $('uRole').value });
+    $('userForm').reset();
+    toast(`Account created for ${email}`);
+    loadUsers();
+  } catch (err) {
+    showError('userError', err.message);
+  } finally {
+    $('userSave').disabled = false;
+    $('userSave').textContent = 'Create user';
+  }
+});
+
+// ---------- Passcodes (super admin) ----------
+
+/** A random passcode without look-alike characters (no 0/O, 1/I/L). */
+function randomCode() {
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (const r of crypto.getRandomValues(new Uint8Array(8))) out += alphabet[r % alphabet.length];
+  return out;
+}
+
+async function loadCodes() {
+  const { data, error } = await sb.from('access_codes').select('id,code,label,created_at').order('created_at');
+  if (error) { setStatus(explain(error, 'Could not load the passcodes.')); return; }
+  const list = $('codeList');
+  list.replaceChildren();
+  if (!data.length) list.append(el('li', 'hint', 'No passcodes yet. Until you create one, nobody can view the list without signing in.'));
+  for (const c of data) {
+    const li = el('li', 'row-card');
+    const main = el('div', 'row-main');
+    main.append(el('div', 'code-value', c.code), el('div', 'hint', c.label || 'No note'));
+    const actions = el('div', 'row-actions');
+    const copy = el('button', 'btn', 'Copy');
+    copy.type = 'button';
+    copy.setAttribute('aria-label', `Copy passcode ${c.code}`);
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(c.code);
+        toast('Passcode copied');
+      } catch {
+        toast('Could not copy. Select the code and copy it by hand.');
+      }
+    });
+    const del = el('button', 'btn danger', 'Delete');
+    del.type = 'button';
+    del.setAttribute('aria-label', `Delete passcode ${c.code}`);
+    del.addEventListener('click', async () => {
+      const yes = await confirmDialog({
+        title: `Delete passcode ${c.code}?`,
+        text: 'Anyone using it will lose access to the list of items the next time the app reloads.',
+        ok: 'Delete',
+        danger: true,
+      });
+      if (!yes) return;
+      const { error: e } = await sb.from('access_codes').delete().eq('id', c.id);
+      toast(e ? explain(e, 'Could not delete the passcode.') : 'Passcode deleted');
+      loadCodes();
+    });
+    actions.append(copy, del);
+    li.append(main, actions);
+    list.append(li);
+  }
+}
+
+$('cRandom').addEventListener('click', () => { $('cCode').value = randomCode(); });
+
+$('codeForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const code = $('cCode').value.trim().toUpperCase();
+  showError('codeError', '');
+  if (!/^[A-Z0-9]{6,64}$/.test(code)) { showError('codeError', 'Use 6 or more letters and numbers, with no spaces.'); $('cCode').focus(); return; }
+  $('codeSave').disabled = true;
+  const { error } = await sb.from('access_codes').insert({ code, label: $('cLabel').value.trim() });
+  $('codeSave').disabled = false;
+  if (error) { showError('codeError', error.code === '23505' ? 'That passcode already exists.' : explain(error, 'Could not create the passcode.')); return; }
+  $('cLabel').value = '';
+  $('cCode').value = randomCode();
+  toast(`Passcode ${code} created`);
+  loadCodes();
+});
+
+// ---------- Sign in / out ----------
+
+const signOut = () => sb.auth.signOut({ scope: 'local' });
+$('signOutBtn').addEventListener('click', signOut);
+$('noRoleSignOut').addEventListener('click', signOut);
 
 let sessionApplied = false;
-function applySession(session) {
-  const id = (session && session.user && session.user.id) || null;
+async function applySession(session) {
+  const user = (session && session.user) || null;
+  const id = user ? user.id : null;
   if (sessionApplied && id === userId) return; // e.g. a token refresh
   sessionApplied = true;
   userId = id;
+  role = null;
   setStatus('');
+  // Leave nothing about products, prices or profit on screen between accounts.
+  items = [];
+  loaded = false;
+  for (const d of document.querySelectorAll('dialog[open]')) d.close();
+  delete document.body.dataset.role;
   if (!id) {
-    // Leave nothing about costs or profit on screen after signing out.
-    items = [];
-    loaded = false;
-    for (const d of document.querySelectorAll('dialog[open]')) d.close();
     document.body.dataset.view = 'login';
     render();
     return;
   }
+
+  const { data, error } = await sb.from('profiles').select('role').eq('user_id', id).maybeSingle();
+  if (userId !== id) return; // changed while we were asking
+  if (error) {
+    document.body.dataset.view = 'app';
+    render();
+    setStatus(explain(error, 'Could not check your access. Reload the page to try again.'));
+    return;
+  }
+  if (!data || !ROLE_NAMES[data.role]) {
+    $('noRoleEmail').textContent = user.email || '';
+    document.body.dataset.view = 'norole';
+    return;
+  }
+  role = data.role;
+  document.body.dataset.role = role;
   document.body.dataset.view = 'app';
+  $('whoEmail').textContent = user.email || '';
+  $('whoRole').textContent = ROLE_NAMES[role];
+  $('cCode').value = randomCode();
+  showTab('products');
   render();
   refreshQuietly();
 }

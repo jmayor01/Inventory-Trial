@@ -27,7 +27,8 @@ function explain(error, fallback) {
   if (!navigator.onLine || /failed to fetch|networkerror|load failed/i.test(message)) return 'No internet connection. Try again when you are back online.';
   if (code === '23505') return 'That barcode is already used by another item.';
   if (code === '42P01' || code === 'PGRST205' || code === 'PGRST202') return 'The database is not set up yet. Run supabase/setup.sql in the Supabase SQL Editor.';
-  if (code === '42501' || code === 'PGRST301') return 'The database is not open to the app yet. Run the latest supabase/setup.sql in the Supabase SQL Editor.';
+  if (code === '28000') return 'That passcode is not valid.';
+  if (code === '42501' || code === 'PGRST301') return 'You do not have permission to do that. Try signing in again.';
   return fallback;
 }
 
@@ -140,6 +141,16 @@ function uncachePhoto(id) {
   photoTx(photoDb, 'readwrite', (store) => store.delete(id)).catch(() => {});
 }
 
+function clearPhotoCache() {
+  photos.clear();
+  photoVersion.clear();
+  photoTx(photoDb, 'readwrite', (store) => store.clear()).catch(() => {});
+}
+
+// How photos are downloaded. Signed-in staff read the table directly; a page
+// can swap this for another route (the inventory app does for passcode viewers).
+let photoFetcher = (ids) => sb.from('item_photos').select('item_id,data').in('item_id', ids);
+
 let photoSync = { running: false, again: false };
 async function syncPhotos() {
   if (photoSync.running) { photoSync.again = true; return; }
@@ -155,10 +166,10 @@ async function syncPhotos() {
       if (changed) render();
       const stale = [...withPhoto.keys()].filter((id) => photoVersion.get(id) !== withPhoto.get(id));
       for (let i = 0; i < stale.length; i += 10) {
-        const { data, error } = await sb.from('item_photos').select('item_id,data').in('item_id', stale.slice(i, i + 10));
+        const { data, error } = await photoFetcher(stale.slice(i, i + 10));
         if (error) return; // offline: try again on the next refresh
-        for (const row of data) cachePhoto(row.item_id, withPhoto.get(row.item_id), row.data);
-        if (data.length) render();
+        for (const row of data || []) cachePhoto(row.item_id, withPhoto.get(row.item_id), row.data);
+        if (data && data.length) render();
       }
     } while (photoSync.again);
   } finally {
@@ -266,6 +277,28 @@ async function savePhoto(item, dataUrl) {
 $('fCancel').addEventListener('click', () => $('itemDlg').close());
 
 $('fScan').addEventListener('click', () => openScanner((code) => { $('fBarcode').value = code; $('fName').focus(); }));
+
+/**
+ * Makes up a barcode for a product that has none. It is a valid EAN-13 that
+ * starts with 2, the range kept free for a shop's own use, so it never clashes
+ * with a manufacturer's barcode and can be printed and scanned like any other.
+ */
+function generateBarcode() {
+  for (;;) {
+    let digits = '2';
+    const random = crypto.getRandomValues(new Uint8Array(11));
+    for (const r of random) digits += String(r % 10);
+    let sum = 0;
+    for (let i = 0; i < 12; i++) sum += Number(digits[i]) * (i % 2 ? 3 : 1);
+    const code = digits + String((10 - (sum % 10)) % 10);
+    if (!items.some((it) => it.barcode === code)) return code;
+  }
+}
+
+$('fGenerate').addEventListener('click', () => {
+  $('fBarcode').value = generateBarcode();
+  toast('Barcode generated');
+});
 
 // ---------- Barcode scanner ----------
 

@@ -14,7 +14,7 @@
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body data-mode="boot">
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5V8ZM3 8l9 5 9-5M12 13v8"/></svg></span>
@@ -40,16 +40,17 @@
         <label class="sr-only" for="search">Search items</label>
         <input id="search" type="search" placeholder="Search name or barcode" autocomplete="off" enterkeyhint="search">
       </div>
+      <button id="lookupBtn" type="button" class="btn primary" data-show="public">Find</button>
       <button id="searchScan" type="button" class="btn square" aria-label="Search by scanning a barcode"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 8v8M11 8v8M14 8v8M17 8v8"/></svg></button>
     </div>
 
-    <section class="stats" aria-label="Inventory totals">
+    <section class="stats" aria-label="Inventory totals" data-show="staff">
       <div class="stat"><span class="stat-value" id="statItems">–</span><span class="stat-label">Items</span></div>
       <div class="stat"><span class="stat-value" id="statUnits">–</span><span class="stat-label">Units</span></div>
       <div class="stat"><span class="stat-value" id="statValue">–</span><span class="stat-label">Stock value</span></div>
     </section>
 
-    <div class="chips" role="group" aria-label="Filter by stock level">
+    <div class="chips" role="group" aria-label="Filter by stock level" data-show="staff viewer">
       <button type="button" class="chip" data-filter="all" aria-pressed="true">All <span id="countAll" class="chip-count"></span></button>
       <button type="button" class="chip" data-filter="low" aria-pressed="false">Low stock <span id="countLow" class="chip-count"></span></button>
       <button type="button" class="chip" data-filter="out" aria-pressed="false">Out of stock <span id="countOut" class="chip-count"></span></button>
@@ -62,15 +63,33 @@
       <p class="empty-title" id="noResultsText"></p>
       <p><button id="noResultsAdd" type="button" class="btn primary">Add as new item</button></p>
     </div>
+    <div id="publicHint" class="empty" hidden>
+      <span class="empty-mark"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 8v8M11 8v8M14 8v8M17 8v8"/></svg></span>
+      <p class="empty-title">Look up a product</p>
+      <p>Tap <strong>Scan barcode</strong>, or type the barcode above and tap <strong>Find</strong>.</p>
+    </div>
+
+    <section class="unlock" aria-labelledby="unlockLabel" data-show="public">
+      <form id="unlockForm">
+        <label id="unlockLabel" for="unlockCode">Have a passcode?</label>
+        <p class="hint">Enter it to see the full list of items.</p>
+        <div class="inline">
+          <input id="unlockCode" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Passcode">
+          <button id="unlockBtn" type="submit" class="btn">Unlock</button>
+        </div>
+        <p id="unlockError" class="error" role="alert" hidden></p>
+      </form>
+    </section>
+
     <div id="empty" class="empty" hidden>
       <span class="empty-mark"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5V8ZM3 8l9 5 9-5M12 13v8"/></svg></span>
       <p class="empty-title">No items yet</p>
-      <p>Tap <strong>Scan barcode</strong> to read a product with the camera, or <strong>Add</strong> to type one in.</p>
+      <p data-show="staff">Tap <strong>Scan barcode</strong> to read a product with the camera, or <strong>Add</strong> to type one in.</p>
     </div>
   </main>
 
   <nav class="actions" aria-label="Main actions">
-    <button id="addBtn" class="btn"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add</span></button>
+    <button id="addBtn" class="btn" data-show="staff"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add</span></button>
     <button id="scanBtn" class="btn primary"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 8v8M11 8v8M14 8v8M17 8v8"/></svg><span>Scan barcode</span></button>
   </nav>
 
@@ -92,6 +111,7 @@
         <input id="fBarcode" name="barcode" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Scan or type">
         <button type="button" id="fScan" class="btn square" aria-label="Scan the barcode with the camera"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 8v8M11 8v8M14 8v8M17 8v8"/></svg></button>
       </div>
+      <button type="button" id="fGenerate" class="btn link">No barcode? Generate one</button>
 
       <div class="two">
         <div>
@@ -154,16 +174,23 @@
   <!-- Backup -->
   <dialog id="menuDlg" aria-labelledby="menuTitle">
     <h2 id="menuTitle">Menu</h2>
+    <p class="hint" data-show="staff">Signed in as <strong id="accountEmail"></strong> (<span id="accountRole"></span>)</p>
+    <p class="hint" data-show="viewer">You are viewing the list with a passcode.</p>
     <div class="stack">
-      <a class="btn" href="admin.html">Back office (login required)</a>
+      <a class="btn" href="admin.html" data-show="staff">Back office</a>
+      <a class="btn" href="admin.html" data-show="public viewer">Staff sign in</a>
+      <button type="button" id="lockBtn" class="btn" data-show="viewer">Forget passcode on this device</button>
+      <button type="button" id="signOutBtn" class="btn" data-show="staff">Sign out</button>
     </div>
-    <h3>Backup</h3>
-    <p class="hint">The inventory is stored online and shared by everyone who opens this app. Export a CSV file to keep your own copy or open it in Excel or Google Sheets. Photos are not included in the CSV file.</p>
-    <div class="stack">
-      <button type="button" id="exportBtn" class="btn">Export CSV</button>
-      <button type="button" id="importBtn" class="btn">Import CSV</button>
-      <button type="button" id="legacyBtn" class="btn" hidden></button>
-      <input id="importFile" type="file" accept=".csv,text/csv" hidden>
+    <div data-show="staff">
+      <h3>Import and export</h3>
+      <p class="hint">Export a CSV file to keep your own copy or open it in Excel or Google Sheets, and import one to add or update many items at once. Photos are not included in the CSV file.</p>
+      <div class="stack">
+        <button type="button" id="exportBtn" class="btn">Export CSV</button>
+        <button type="button" id="importBtn" class="btn">Import CSV</button>
+        <button type="button" id="legacyBtn" class="btn" hidden></button>
+        <input id="importFile" type="file" accept=".csv,text/csv" hidden>
+      </div>
     </div>
     <p id="menuMsg" class="hint" role="status"></p>
     <div class="dlg-actions">

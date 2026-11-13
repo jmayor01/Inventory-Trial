@@ -30,7 +30,7 @@
   <section id="loginView" class="login" aria-labelledby="loginTitle">
     <form id="loginForm">
       <h2 id="loginTitle">Sign in to the back office</h2>
-      <p class="hint">Original prices and profit are only shown to signed-in users.</p>
+      <p class="hint">For admins and the super admin.</p>
       <label for="lEmail">Email</label>
       <input id="lEmail" type="email" autocomplete="username" autocapitalize="off" required>
       <label for="lPassword">Password</label>
@@ -40,10 +40,23 @@
     </form>
   </section>
 
+  <section id="noRoleView" class="login" aria-labelledby="noRoleTitle">
+    <h2 id="noRoleTitle">This account has no access</h2>
+    <p class="hint">You are signed in as <strong id="noRoleEmail"></strong>, but the account has not been given a role. Ask the super admin to add it under Users.</p>
+    <button id="noRoleSignOut" type="button" class="btn">Sign out</button>
+  </section>
+
   <main>
+    <p class="hint whoami">Signed in as <strong id="whoEmail"></strong> · <span id="whoRole"></span></p>
+    <div class="tabs" role="tablist" aria-label="Back office sections" data-role="super_admin">
+      <button type="button" class="tab" role="tab" data-tab="products" aria-selected="true">Products</button>
+      <button type="button" class="tab" role="tab" data-tab="users" aria-selected="false">Users</button>
+      <button type="button" class="tab" role="tab" data-tab="codes" aria-selected="false">Passcodes</button>
+    </div>
     <p id="status" class="status" role="status" hidden></p>
 
-    <section class="stats profit-stats" aria-label="Profit summary">
+    <div id="tab-products" class="tabpanel">
+    <section class="stats profit-stats" aria-label="Profit summary" data-role="super_admin">
       <div class="stat highlight">
         <span class="stat-value" id="statProfit">–</span>
         <span class="stat-label">Expected profit</span>
@@ -52,7 +65,7 @@
       <div class="stat"><span class="stat-value" id="statValue">–</span><span class="stat-label">Stock at market price</span></div>
       <div class="stat"><span class="stat-value" id="statCost">–</span><span class="stat-label">Stock at original price</span></div>
     </section>
-    <p class="hint profit-note">Expected profit is what you earn if all current stock sells at its market price. <span id="missingNote"></span></p>
+    <p class="hint profit-note" data-role="super_admin">Expected profit is what you earn if all current stock sells at its market price. <span id="missingNote"></span></p>
 
     <div class="toolbar">
       <div class="searchbox">
@@ -64,9 +77,9 @@
         <label class="sr-only" for="sort">Sort products</label>
         <select id="sort">
           <option value="name">Sort: name</option>
-          <option value="profit">Sort: highest expected profit</option>
-          <option value="unit">Sort: highest profit per unit</option>
-          <option value="margin">Sort: lowest margin</option>
+          <option value="profit" data-role="super_admin">Sort: highest expected profit</option>
+          <option value="unit" data-role="super_admin">Sort: highest profit per unit</option>
+          <option value="margin" data-role="super_admin">Sort: lowest margin</option>
           <option value="stock">Sort: lowest stock</option>
         </select>
         <button id="exportBtn" type="button" class="btn">Export CSV</button>
@@ -74,7 +87,7 @@
       </div>
     </div>
 
-    <div class="chips" role="group" aria-label="Filter products">
+    <div class="chips" role="group" aria-label="Filter products" data-role="super_admin">
       <button type="button" class="chip" data-filter="all" aria-pressed="true">All <span id="countAll" class="chip-count"></span></button>
       <button type="button" class="chip" data-filter="nocost" aria-pressed="false">No original price <span id="countNoCost" class="chip-count"></span></button>
       <button type="button" class="chip" data-filter="loss" aria-pressed="false">Selling at a loss <span id="countLoss" class="chip-count"></span></button>
@@ -87,6 +100,45 @@
       <span class="empty-mark"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5V8ZM3 8l9 5 9-5M12 13v8"/></svg></span>
       <p class="empty-title">No products yet</p>
       <p>Tap <strong>Add product</strong> to create the first one.</p>
+    </div>
+    </div>
+
+    <div id="tab-users" class="tabpanel" hidden>
+      <h2 class="section-title">Users</h2>
+      <p class="hint">An <strong>admin</strong> can add, change and delete items, change stock, and import and export. A <strong>super admin</strong> can also see original prices and profit, and manage users and passcodes.</p>
+      <ul id="userList" class="list plain"></ul>
+      <form id="userForm" class="card-form" novalidate>
+        <h3>Add a user</h3>
+        <label for="uEmail">Email</label>
+        <input id="uEmail" type="email" autocomplete="off" autocapitalize="off" required>
+        <label for="uPassword">Password <span class="optional">at least 8 characters</span></label>
+        <input id="uPassword" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" minlength="8" required>
+        <label for="uRole">Role</label>
+        <select id="uRole">
+          <option value="admin">Admin</option>
+          <option value="super_admin">Super admin</option>
+        </select>
+        <p id="userError" class="error" role="alert" hidden></p>
+        <button id="userSave" type="submit" class="btn primary">Create user</button>
+      </form>
+    </div>
+
+    <div id="tab-codes" class="tabpanel" hidden>
+      <h2 class="section-title">Passcodes</h2>
+      <p class="hint">Without a passcode, someone who opens the app link can only look up one product at a time by its barcode. Give a passcode to people who should see the whole list of items. Delete a passcode to stop it working.</p>
+      <ul id="codeList" class="list plain"></ul>
+      <form id="codeForm" class="card-form" novalidate>
+        <h3>Create a passcode</h3>
+        <label for="cCode">Passcode <span class="optional">6 or more letters and numbers</span></label>
+        <div class="inline">
+          <input id="cCode" autocomplete="off" autocapitalize="characters" spellcheck="false" minlength="6" maxlength="64" required>
+          <button id="cRandom" type="button" class="btn">New code</button>
+        </div>
+        <label for="cLabel">Who is it for? <span class="optional">optional</span></label>
+        <input id="cLabel" autocomplete="off" maxlength="80" placeholder="e.g. Sales staff">
+        <p id="codeError" class="error" role="alert" hidden></p>
+        <button id="codeSave" type="submit" class="btn primary">Create passcode</button>
+      </form>
     </div>
   </main>
 
@@ -103,9 +155,10 @@
         <input id="fBarcode" name="barcode" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Scan or type">
         <button type="button" id="fScan" class="btn square" aria-label="Scan the barcode with the camera"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 8v8M11 8v8M14 8v8M17 8v8"/></svg></button>
       </div>
+      <button type="button" id="fGenerate" class="btn link">No barcode? Generate one</button>
 
       <div class="two">
-        <div>
+        <div data-role="super_admin">
           <label for="fCost">Original price</label>
           <input id="fCost" name="cost" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" aria-describedby="fProfit">
         </div>
@@ -114,7 +167,7 @@
           <input id="fPrice" name="price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" aria-describedby="fProfit">
         </div>
       </div>
-      <p id="fProfit" class="profit-preview" aria-live="polite"></p>
+      <p id="fProfit" class="profit-preview" aria-live="polite" data-role="super_admin"></p>
 
       <div class="two">
         <div>

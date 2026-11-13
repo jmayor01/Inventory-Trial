@@ -2,34 +2,55 @@
 
 // The inventory app. Shared helpers (photos, scanner, form bits) are in common.js.
 
-// ---------- Shared inventory (Supabase) ----------
-// Items live in a Supabase database so everyone who opens the app sees the same
-// list. There is no sign-in: the database rules in supabase/setup.sql allow
-// anyone to read and change the inventory. This device only keeps a copy for
-// viewing while offline.
+// ---------- Who is using the app ----------
+// What a visitor can do depends on `mode`, and the database enforces the same
+// rules (supabase/setup.sql), so nothing here is the real lock:
+//   public - not signed in, no passcode: look up one item by its barcode
+//   viewer - holds a passcode: sees the whole list, read-only
+//   staff  - signed in as admin or super admin: can change everything
 
-const CACHE_KEY = 'inventory.cache.v2';
+const CACHE_KEY = 'inventory.cache.v3';
+const PASSCODE_KEY = 'inventory.passcode';
+const ROLE_KEY = 'inventory.role'; // last known role, so staff can open the app offline
 const LEGACY_KEY = 'inventory.items.v1'; // items from before the inventory was shared
 
-const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INVENTORY_CONFIG.supabaseKey, {
-  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-});
+// The sign-in session is shared with the back office (same site, same storage).
+const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INVENTORY_CONFIG.supabaseKey);
 
 /** @type {{id:string, barcode:string, name:string, description:string, price:number, qty:number, photo_updated_at:string|null}[]} */
 let items = [];
 let loaded = false; // false until the list has come from the server or the offline copy
+let mode = 'boot'; // 'boot' | 'public' | 'viewer' | 'staff'
+let role = null; // 'admin' | 'super_admin' when mode is 'staff'
+let passcode = ''; // the passcode in use when mode is 'viewer'
+// The public barcode lookup: state is 'idle' | 'loading' | 'found' | 'missing' | 'error'.
+let lookup = { state: 'idle', code: '', item: null, message: '' };
+
+const isStaff = () => mode === 'staff';
+
+const stored = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch { /* storage blocked or full */ } },
+  remove(key) { try { localStorage.removeItem(key); } catch { /* ignore */ } },
+};
 
 function readCache() {
   try {
-    const c = JSON.parse(localStorage.getItem(CACHE_KEY));
-    return c && Array.isArray(c.items) ? c.items : null;
+    const c = JSON.parse(stored.get(CACHE_KEY));
+    return c && c.mode === mode && Array.isArray(c.items) ? c.items : null;
   } catch {
     return null;
   }
 }
 
 function writeCache() {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ items })); } catch { /* storage full: offline copy is optional */ }
+  if (mode === 'staff' || mode === 'viewer') stored.set(CACHE_KEY, JSON.stringify({ mode, items }));
+}
+
+/** Removes everything this device remembers about the inventory. */
+function forgetInventory() {
+  stored.remove(CACHE_KEY);
+  clearPhotoCache();
 }
 
 function setStatus(text) {
@@ -37,15 +58,25 @@ function setStatus(text) {
   $('status').hidden = !text;
 }
 
-/** Loads every item from the server. Throws on failure. */
+/** Loads every item the visitor may see. Throws on failure. */
 async function refresh() {
-  const rows = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from('items').select(ITEM_COLUMNS).order('id').range(from, from + 999);
+  const forMode = mode;
+  let rows = [];
+  if (mode === 'staff') {
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await sb.from('items').select(ITEM_COLUMNS).order('id').range(from, from + 999);
+      if (error) throw error;
+      rows.push(...data);
+      if (data.length < 1000) break;
+    }
+  } else if (mode === 'viewer') {
+    const { data, error } = await sb.rpc('list_items_with_code', { p_code: passcode });
     if (error) throw error;
-    rows.push(...data);
-    if (data.length < 1000) break;
+    rows = data || [];
+  } else {
+    return;
   }
+  if (forMode !== mode) return; // signed in or out meanwhile
   items = rows.map(fromRow);
   loaded = true;
   writeCache();
@@ -54,10 +85,21 @@ async function refresh() {
 }
 
 async function refreshQuietly() {
+  if (mode !== 'staff' && mode !== 'viewer') return;
+  const forMode = mode;
   try {
     await refresh();
     setStatus('');
   } catch (e) {
+    if (forMode !== mode) return;
+    if (mode === 'viewer' && e && e.code === '28000') {
+      // The super admin removed this passcode.
+      stored.remove(PASSCODE_KEY);
+      forgetInventory();
+      enterPublic();
+      toast('That passcode no longer works.');
+      return;
+    }
     setStatus(`${explain(e, 'Could not load the latest items.')}${items.length ? ' Showing the copy saved on this device.' : ''}`);
     loaded = true;
     render();
@@ -70,15 +112,97 @@ function scheduleRefresh() {
   refreshTimer = setTimeout(refreshQuietly, 400);
 }
 
-// Live updates: reload when anyone changes the items table.
+// Live updates for signed-in staff: reload when anyone changes the items table.
 let channel = null;
-function startRealtime() {
-  channel = sb.channel('items-changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, scheduleRefresh)
-    .subscribe();
+function setRealtime(on) {
+  if (channel) { sb.removeChannel(channel); channel = null; }
+  if (on) {
+    channel = sb.channel('items-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, scheduleRefresh)
+      .subscribe();
+  }
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleRefresh(); });
 window.addEventListener('online', scheduleRefresh);
+
+function setMode(next) {
+  mode = next;
+  document.body.dataset.mode = next;
+  setStatus('');
+  for (const d of document.querySelectorAll('dialog[open]')) d.close();
+  // Passcode viewers get photos through the passcode, staff straight from the table.
+  photoFetcher = next === 'viewer'
+    ? (ids) => sb.rpc('item_photos_with_code', { p_code: passcode, p_ids: ids })
+    : (ids) => sb.from('item_photos').select('item_id,data').in('item_id', ids);
+  lookup = { state: 'idle', code: '', item: null, message: '' };
+  $('search').value = '';
+  $('search').placeholder = next === 'public' ? 'Type or scan a barcode' : 'Search name or barcode';
+  const cached = next === 'staff' || next === 'viewer' ? readCache() : null;
+  items = cached || [];
+  loaded = next === 'public' || Boolean(cached);
+  setRealtime(next === 'staff');
+  render();
+}
+
+function enterPublic() {
+  role = null;
+  passcode = '';
+  setMode('public');
+}
+
+function enterViewer(code) {
+  role = null;
+  passcode = code;
+  setMode('viewer');
+  refreshQuietly();
+}
+
+function enterStaff(newRole, email) {
+  role = newRole;
+  passcode = '';
+  $('accountEmail').textContent = email || '';
+  $('accountRole').textContent = newRole === 'super_admin' ? 'super admin' : 'admin';
+  setMode('staff');
+  refreshQuietly().then(offerLegacyUpload);
+}
+
+// ---------- Public barcode lookup ----------
+
+async function lookupBarcode(value) {
+  const code = String(value || '').trim();
+  if (!code) { $('search').focus(); return; }
+  $('search').value = code;
+  lookup = { state: 'loading', code, item: null, message: '' };
+  render();
+  const { data, error } = await sb.rpc('lookup_item', { p_barcode: code });
+  if (mode !== 'public' || lookup.code !== code) return; // superseded
+  if (error) {
+    lookup = { state: 'error', code, item: null, message: explain(error, 'Could not look up that barcode. Please try again.') };
+  } else if (!data) {
+    lookup = { state: 'missing', code, item: null, message: '' };
+  } else {
+    const { photo, ...row } = data;
+    const item = fromRow(row);
+    if (photo) photos.set(item.id, photo); else photos.delete(item.id);
+    lookup = { state: 'found', code, item, message: '' };
+  }
+  render();
+}
+
+function renderPublic() {
+  const list = $('list');
+  list.replaceChildren();
+  if (lookup.state === 'loading') list.append(el('li', 'skeleton'));
+  if (lookup.state === 'found') list.append(detailCard(lookup.item, false));
+  list.setAttribute('aria-busy', String(lookup.state === 'loading'));
+  setStatus(lookup.state === 'error' ? lookup.message : '');
+  $('summary').textContent = '';
+  $('empty').hidden = true;
+  $('publicHint').hidden = lookup.state !== 'idle' && lookup.state !== 'error';
+  $('noResults').hidden = lookup.state !== 'missing';
+  $('noResultsText').textContent = lookup.state === 'missing' ? `No item has barcode ${lookup.code}.` : '';
+  $('noResultsAdd').hidden = true;
+}
 
 // ---------- List ----------
 
@@ -95,6 +219,13 @@ function stockBadge(it) {
   if (isOut(it)) return el('span', 'badge out', 'Out of stock');
   if (isLow(it)) return el('span', 'badge low', 'Low stock');
   return null;
+}
+
+/** Stock as plain text, for visitors who cannot change it. */
+function qtyText(it) {
+  const wrap = el('div', 'qty-text');
+  wrap.append(el('strong', '', String(it.qty)), el('span', '', 'in stock'));
+  return wrap;
 }
 
 function qtyControls(it) {
@@ -145,8 +276,8 @@ function detailCard(it, inDialog) {
     facts.append(el('dt', '', label), dd);
   };
   fact('Price', money.format(it.price));
-  fact('In stock', qtyControls(it));
-  fact('Stock value', money.format(it.price * it.qty));
+  fact('In stock', isStaff() ? qtyControls(it) : String(it.qty));
+  if (isStaff()) fact('Stock value', money.format(it.price * it.qty));
   fact('Barcode', it.barcode || 'None');
   const updated = it.updated_at ? new Date(it.updated_at) : null;
   if (updated && !Number.isNaN(updated.getTime())) {
@@ -155,11 +286,12 @@ function detailCard(it, inDialog) {
   card.append(facts);
 
   const actions = el('div', 'detail-actions');
-  const back = el('button', 'btn', inDialog ? 'Close' : 'Show all items');
+  const back = el('button', 'btn', inDialog ? 'Close' : mode === 'public' ? 'Clear' : 'Show all items');
   back.type = 'button';
   back.addEventListener('click', () => {
     if (inDialog) { $('detailDlg').close(); return; }
     $('search').value = '';
+    lookup = { state: 'idle', code: '', item: null, message: '' };
     render();
   });
   const edit = el('button', 'btn primary', 'Edit');
@@ -169,7 +301,8 @@ function detailCard(it, inDialog) {
     if (inDialog) $('detailDlg').close();
     openItem(it);
   });
-  actions.append(back, edit);
+  actions.append(back);
+  if (isStaff()) actions.append(edit);
   card.append(actions);
   return card;
 }
@@ -199,11 +332,13 @@ function itemRow(it) {
   main.append(text);
   main.addEventListener('click', () => openDetails(it));
 
-  li.append(main, qtyControls(it));
+  li.append(main, isStaff() ? qtyControls(it) : qtyText(it));
   return li;
 }
 
 function render() {
+  if (mode === 'public') { renderPublic(); return; }
+  $('publicHint').hidden = true;
   const raw = $('search').value.trim();
   const q = raw.toLowerCase();
   const shown = items
@@ -245,7 +380,7 @@ function render() {
     $('noResultsText').textContent = !q
       ? (stockFilter === 'low' ? 'No items are low on stock.' : 'No items are out of stock.')
       : raw === scannedQuery ? `No item has barcode ${raw}.` : `No item matches "${raw}".`;
-    $('noResultsAdd').hidden = !q;
+    $('noResultsAdd').hidden = !q || !isStaff();
   }
 
   // Keep an open details dialog in step with the data.
@@ -263,7 +398,7 @@ const qtyPending = new Map(); // item id -> number of +/- taps still being saved
 
 async function changeQty(id, delta) {
   const it = items.find((x) => x.id === id);
-  if (!it) return;
+  if (!it || !isStaff()) return;
   it.qty = Math.max(0, it.qty + delta);
   render();
   qtyPending.set(id, (qtyPending.get(id) || 0) + 1);
@@ -289,6 +424,7 @@ async function changeQty(id, delta) {
 
 let editingId = null;
 function openItem(item, presetBarcode) {
+  if (!isStaff()) return;
   editingId = item ? item.id : null;
   $('itemTitle').textContent = item ? 'Edit item' : 'Add item';
   $('fBarcode').value = item ? item.barcode : presetBarcode || '';
@@ -377,22 +513,36 @@ $('fDelete').addEventListener('click', async () => {
 
 $('scanBtn').addEventListener('click', () =>
   openScanner((code) => {
+    if (mode === 'public') { lookupBarcode(code); return; }
     const found = items.find((x) => x.barcode === code);
     if (found) {
       openDetails(found);
-    } else {
+    } else if (isStaff()) {
       toast('New barcode — add the item details');
       openItem(null, code);
+    } else {
+      toast(`No item has barcode ${code}.`);
     }
   }),
 );
 
 $('addBtn').addEventListener('click', () => openItem(null));
-$('search').addEventListener('input', render);
 
-// Search by barcode: scan, then show only the matching item(s) in the list.
+// Signed-in staff and passcode viewers filter the list as they type. The
+// public can only ask for one exact barcode, with Enter or the Find button.
+$('search').addEventListener('input', () => {
+  if (mode !== 'public') { render(); return; }
+  if (lookup.state !== 'idle') { lookup = { state: 'idle', code: '', item: null, message: '' }; render(); }
+});
+$('search').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && mode === 'public') { e.preventDefault(); lookupBarcode($('search').value); }
+});
+$('lookupBtn').addEventListener('click', () => lookupBarcode($('search').value));
+
+// Search by barcode: scan, then show only the matching item.
 $('searchScan').addEventListener('click', () =>
   openScanner((code) => {
+    if (mode === 'public') { lookupBarcode(code); return; }
     scannedQuery = code;
     $('search').value = code;
     render();
@@ -404,7 +554,44 @@ $('noResultsAdd').addEventListener('click', () => {
   openItem(null, raw === scannedQuery ? raw : '');
 });
 
-// ---------- Backup: CSV export / import ----------
+// ---------- Passcode ----------
+
+$('unlockForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const code = $('unlockCode').value.trim().toUpperCase();
+  const err = $('unlockError');
+  err.hidden = true;
+  if (!code) { $('unlockCode').focus(); return; }
+  $('unlockBtn').disabled = true;
+  const { data, error } = await sb.rpc('list_items_with_code', { p_code: code });
+  $('unlockBtn').disabled = false;
+  if (error) {
+    err.textContent = error.code === '28000' ? 'That passcode is not right. Check it and try again.' : explain(error, 'Could not check the passcode. Please try again.');
+    err.hidden = false;
+    return;
+  }
+  if (mode !== 'public') return; // signed in meanwhile
+  $('unlockCode').value = '';
+  stored.set(PASSCODE_KEY, code);
+  role = null;
+  passcode = code;
+  setMode('viewer');
+  items = (data || []).map(fromRow);
+  loaded = true;
+  writeCache();
+  render();
+  syncPhotos();
+  toast('Unlocked — showing all items');
+});
+
+$('lockBtn').addEventListener('click', () => {
+  stored.remove(PASSCODE_KEY);
+  forgetInventory();
+  enterPublic();
+  toast('Passcode forgotten on this device');
+});
+
+// ---------- Import and export (staff) ----------
 
 const CSV_COLUMNS = ['barcode', 'name', 'description', 'price', 'qty'];
 
@@ -566,6 +753,7 @@ async function runLegacyUpload() {
 }
 
 async function offerLegacyUpload() {
+  if (!isStaff()) return;
   const n = legacyItems().length;
   const askedKey = `${LEGACY_KEY}.asked`;
   if (!n || localStorage.getItem(askedKey)) return;
@@ -667,10 +855,58 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // Start: show the copy saved on this device at once, then load the live list.
-const cached = readCache();
-items = cached || [];
-loaded = Boolean(cached);
+// ---------- Sign-in state ----------
+
+$('signOutBtn').addEventListener('click', async () => {
+  $('menuDlg').close();
+  stored.remove(ROLE_KEY);
+  forgetInventory(); // leave nothing behind on a shared device
+  await sb.auth.signOut({ scope: 'local' });
+});
+
+let sessionSeen = false;
+let sessionUserId = null;
+
+async function applySession(session) {
+  const user = (session && session.user) || null;
+  const id = user ? user.id : null;
+  if (sessionSeen && id === sessionUserId) return; // e.g. a token refresh
+  sessionSeen = true;
+  sessionUserId = id;
+
+  if (id) {
+    const { data, error } = await sb.from('profiles').select('role').eq('user_id', id).maybeSingle();
+    if (sessionUserId !== id) return; // changed while we were asking
+    let found = data ? data.role : null;
+    if (error) {
+      // Offline: trust the role this device saw last time for the same account.
+      try {
+        const last = JSON.parse(stored.get(ROLE_KEY));
+        if (last && last.userId === id) found = last.role;
+      } catch { /* none remembered */ }
+    }
+    if (found === 'admin' || found === 'super_admin') {
+      stored.set(ROLE_KEY, JSON.stringify({ userId: id, role: found }));
+      enterStaff(found, user.email);
+      return;
+    }
+    stored.remove(ROLE_KEY);
+  }
+
+  const code = stored.get(PASSCODE_KEY);
+  if (code) enterViewer(code); else enterPublic();
+}
+
+// Supabase must not be called from inside this callback, hence the timeout.
+sb.auth.onAuthStateChange((event, session) => setTimeout(() => applySession(session), 0));
+
+// Before roles existed the whole inventory was cached on every device. Drop
+// that copy so it does not outlive the access that allowed it.
+const hadOpenAccessCache = stored.get('inventory.cache.v2') !== null;
+stored.remove('inventory.cache.v2');
+
 render();
-loadPhotoCache().then(() => { if (photos.size) render(); });
-startRealtime();
-refreshQuietly().then(offerLegacyUpload);
+loadPhotoCache().then(() => {
+  if (hadOpenAccessCache) clearPhotoCache();
+  if (photos.size) render();
+});
