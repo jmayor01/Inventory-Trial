@@ -40,7 +40,7 @@ create table if not exists public.item_photos (
 -- Access: open, no login ---------------------------------------------------------
 -- The app has no sign-in, so anyone who has the app link (or the publishable
 -- key in config.js) can read, change and delete everything in these two tables.
--- Nothing else in the project is opened up.
+-- Nothing else in the project is opened up: cost prices (below) need a login.
 
 alter table public.items enable row level security;
 alter table public.item_photos enable row level security;
@@ -56,6 +56,25 @@ create policy "Anyone can use item photos" on public.item_photos
   for all to anon, authenticated using (true) with check (true);
 
 grant select, insert, update, delete on public.items, public.item_photos to anon, authenticated;
+
+-- Back office: cost prices ------------------------------------------------------
+-- Kept apart from items so that only signed-in back-office users can read them
+-- (the items table above is open to everyone). Profit is worked out from these.
+
+create table if not exists public.item_costs (
+  item_id uuid primary key references public.items (id) on delete cascade,
+  cost numeric(12, 2) not null check (cost >= 0),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.item_costs enable row level security;
+
+drop policy if exists "Back office can use item costs" on public.item_costs;
+create policy "Back office can use item costs" on public.item_costs
+  for all to authenticated using (true) with check (true);
+
+revoke all on public.item_costs from anon;
+grant select, insert, update, delete on public.item_costs to authenticated;
 
 -- Quantity +/- that stays correct when two people tap at the same time ----------
 

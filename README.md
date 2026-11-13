@@ -30,14 +30,33 @@ Android and iOS with nothing to install from an app store.
 Supported codes: EAN-13, EAN-8, UPC-A, UPC-E, Code 128, Code 39, Code 93, ITF,
 Codabar, QR and Data Matrix.
 
+## Back office
+
+Open **Menu → Back office**, or go to `/admin.html`. It needs a login.
+
+- **Add, edit and delete products**, with a **cost price** next to the selling
+  price. The form shows the profit per unit while you type.
+- **Profit at a glance** — expected profit, overall margin, and the stock valued
+  at selling price and at cost. *Expected profit* is what you earn if all
+  current stock sells at its selling price; the app does not record sales.
+- Per product: cost, price, profit per unit, margin, stock and expected profit,
+  with sorting, search, and filters for products with no cost price or selling
+  at a loss.
+- **Export CSV** including cost and profit.
+
+Cost prices are stored in their own table that only signed-in users can read,
+so they never appear in the inventory app. Back-office users are the accounts
+under **Authentication → Users** in Supabase; keep **Allow new users to sign
+up** switched off there so nobody can create an account for themselves.
+
 ## Where the data lives
 
 Items and photos are stored in a [Supabase](https://supabase.com) database
 (the project is set in `config.js`). Each device also keeps a copy of the list
 for offline viewing.
 
-**There is no login.** Anyone who has the app link can view, change and delete
-every item and photo, and there is no record of who did what. Share the link
+**The inventory app has no login.** Anyone who has the app link can view, change
+and delete every item and photo (but not cost prices or profit), and there is no record of who did what. Share the link
 only with people you trust, and use **Backup → Export CSV** regularly so the
 list can be restored if something is deleted.
 
@@ -96,7 +115,9 @@ it from a phone over plain `http://<ip>` will not — use a deployed https link.
 
 | File | Purpose |
 | --- | --- |
-| `index.html`, `styles.css`, `app.js` | The whole app |
+| `index.html`, `app.js` | The inventory app |
+| `admin.html`, `admin.js` | The back office |
+| `common.js`, `styles.css` | Code and styles both pages share |
 | `config.js` | Which Supabase project to use |
 | `supabase/setup.sql` | Database tables and access rules |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and home-screen install |

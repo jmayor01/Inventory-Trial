@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Inventory back office</title>
+  <meta name="description" content="Inventory back office: products and profit">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171c23" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Inventory">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="admin" data-view="boot">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5V8ZM3 8l9 5 9-5M12 13v8"/></svg></span>
+      <h1>Back office</h1>
+    </div>
+    <div class="topbar-links">
+      <a class="btn ghost" href="./">Inventory</a>
+      <button id="signOutBtn" type="button" class="btn ghost">Sign out</button>
+    </div>
+  </header>
+
+  <section id="loginView" class="login" aria-labelledby="loginTitle">
+    <form id="loginForm">
+      <h2 id="loginTitle">Sign in to the back office</h2>
+      <p class="hint">Product costs and profit are only shown to signed-in users.</p>
+      <label for="lEmail">Email</label>
+      <input id="lEmail" type="email" autocomplete="username" autocapitalize="off" required>
+      <label for="lPassword">Password</label>
+      <input id="lPassword" type="password" autocomplete="current-password" required>
+      <p id="loginError" class="error" role="alert" hidden></p>
+      <button id="loginBtn" type="submit" class="btn primary">Sign in</button>
+    </form>
+  </section>
+
+  <main>
+    <p id="status" class="status" role="status" hidden></p>
+
+    <section class="stats profit-stats" aria-label="Profit summary">
+      <div class="stat highlight">
+        <span class="stat-value" id="statProfit">–</span>
+        <span class="stat-label">Expected profit</span>
+      </div>
+      <div class="stat"><span class="stat-value" id="statMargin">–</span><span class="stat-label">Margin</span></div>
+      <div class="stat"><span class="stat-value" id="statValue">–</span><span class="stat-label">Stock at selling price</span></div>
+      <div class="stat"><span class="stat-value" id="statCost">–</span><span class="stat-label">Stock at cost</span></div>
+    </section>
+    <p class="hint profit-note">Expected profit is what you earn if all current stock sells at its selling price. <span id="missingNote"></span></p>
+
+    <div class="toolbar">
+      <div class="searchbox">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <label class="sr-only" for="search">Search products</label>
+        <input id="search" type="search" placeholder="Search name or barcode" autocomplete="off" enterkeyhint="search">
+      </div>
+      <div class="toolbar-row">
+        <label class="sr-only" for="sort">Sort products</label>
+        <select id="sort">
+          <option value="name">Sort: name</option>
+          <option value="profit">Sort: highest expected profit</option>
+          <option value="unit">Sort: highest profit per unit</option>
+          <option value="margin">Sort: lowest margin</option>
+          <option value="stock">Sort: lowest stock</option>
+        </select>
+        <button id="exportBtn" type="button" class="btn">Export CSV</button>
+        <button id="addBtn" type="button" class="btn primary"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add product</span></button>
+      </div>
+    </div>
+
+    <div class="chips" role="group" aria-label="Filter products">
+      <button type="button" class="chip" data-filter="all" aria-pressed="true">All <span id="countAll" class="chip-count"></span></button>
+      <button type="button" class="chip" data-filter="nocost" aria-pressed="false">No cost price <span id="countNoCost" class="chip-count"></span></button>
+      <button type="button" class="chip" data-filter="loss" aria-pressed="false">Selling at a loss <span id="countLoss" class="chip-count"></span></button>
+    </div>
+
+    <p id="summary" class="summary" aria-live="polite"></p>
+    <ul id="list" class="list"></ul>
+    <div id="noResults" class="empty" hidden><p class="empty-title" id="noResultsText"></p></div>
+    <div id="empty" class="empty" hidden>
+      <span class="empty-mark"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5V8ZM3 8l9 5 9-5M12 13v8"/></svg></span>
+      <p class="empty-title">No products yet</p>
+      <p>Tap <strong>Add product</strong> to create the first one.</p>
+    </div>
+  </main>
+
+  <!-- Add / edit item -->
+  <dialog id="itemDlg" aria-labelledby="itemTitle">
+    <form id="itemForm" method="dialog" novalidate>
+      <h2 id="itemTitle" tabindex="-1">Add product</h2>
+
+      <label for="fName">Name <span class="req" aria-hidden="true">*</span></label>
+      <input id="fName" name="name" required autocomplete="off" enterkeyhint="next">
+
+      <label for="fBarcode">Barcode</label>
+      <div class="inline">
+        <input id="fBarcode" name="barcode" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Scan or type">
+        <button type="button" id="fScan" class="btn square" aria-label="Scan the barcode with the camera"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 8v8M11 8v8M14 8v8M17 8v8"/></svg></button>
+      </div>
+
+      <div class="two">
+        <div>
+          <label for="fCost">Cost price</label>
+          <input id="fCost" name="cost" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" aria-describedby="fProfit">
+        </div>
+        <div>
+          <label for="fPrice">Selling price</label>
+          <input id="fPrice" name="price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" aria-describedby="fProfit">
+        </div>
+      </div>
+      <p id="fProfit" class="profit-preview" aria-live="polite"></p>
+
+      <div class="two">
+        <div>
+          <label for="fQty">Quantity in stock</label>
+          <input id="fQty" name="qty" type="number" inputmode="numeric" min="0" step="1" placeholder="0">
+        </div>
+      </div>
+
+      <label for="fDesc">Description <span class="optional">optional</span></label>
+      <textarea id="fDesc" name="description" rows="2"></textarea>
+
+      <span class="label" id="photoLabel">Photo <span class="optional">optional</span></span>
+      <div class="photo" role="group" aria-labelledby="photoLabel">
+        <img id="fPhotoPreview" alt="Item photo" hidden>
+        <div class="photo-buttons">
+          <button type="button" id="fPhotoCamera" class="btn"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg><span>Take photo</span></button>
+          <button type="button" id="fPhotoPick" class="btn">Gallery</button>
+          <button type="button" id="fPhotoRemove" class="btn danger" hidden>Remove</button>
+        </div>
+        <input id="fPhotoCameraFile" type="file" accept="image/*" capture="environment" hidden>
+        <input id="fPhotoFile" type="file" accept="image/*" hidden>
+      </div>
+
+      <p id="formError" class="error" role="alert" hidden></p>
+
+      <div class="dlg-actions">
+        <button type="button" id="fDelete" class="btn danger" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="fCancel" class="btn">Cancel</button>
+        <button type="submit" id="fSave" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Camera scanner -->
+  <dialog id="scanDlg" aria-labelledby="scanTitle">
+    <h2 id="scanTitle">Scan barcode</h2>
+    <p class="hint">Hold the barcode inside the frame. It is read automatically.</p>
+    <div class="scan-frame">
+      <video id="scanVideo" playsinline muted aria-label="Camera preview"></video>
+      <div class="scan-guide" aria-hidden="true"></div>
+      <button type="button" id="torchBtn" class="torch" aria-pressed="false" hidden>Light</button>
+    </div>
+    <p id="scanError" class="error" role="alert" hidden></p>
+    <form id="scanManual" class="inline scan-manual">
+      <label class="sr-only" for="scanManualInput">Type the barcode instead</label>
+      <input id="scanManualInput" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Or type the barcode">
+      <button type="submit" class="btn">Use</button>
+    </form>
+    <div class="dlg-actions">
+      <span class="spacer"></span>
+      <button type="button" id="scanCancel" class="btn" autofocus>Cancel</button>
+    </div>
+  </dialog>
+
+  <!-- Yes / no question -->
+  <dialog id="confirmDlg" aria-labelledby="confirmTitle" aria-describedby="confirmText">
+    <h2 id="confirmTitle"></h2>
+    <p id="confirmText" class="hint"></p>
+    <div class="dlg-actions">
+      <span class="spacer"></span>
+      <button type="button" id="confirmCancel" class="btn">Cancel</button>
+      <button type="button" id="confirmOk" class="btn primary"></button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="vendor/barcode-detector.js"></script>
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>

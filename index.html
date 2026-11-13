@@ -20,7 +20,7 @@
       <span class="brand-mark"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5V8ZM3 8l9 5 9-5M12 13v8"/></svg></span>
       <h1>Inventory</h1>
     </div>
-    <button id="menuBtn" class="btn ghost" aria-haspopup="dialog">Backup</button>
+    <button id="menuBtn" class="btn ghost" aria-haspopup="dialog">Menu</button>
   </header>
 
   <main>
@@ -153,7 +153,11 @@
 
   <!-- Backup -->
   <dialog id="menuDlg" aria-labelledby="menuTitle">
-    <h2 id="menuTitle">Backup</h2>
+    <h2 id="menuTitle">Menu</h2>
+    <div class="stack">
+      <a class="btn" href="admin.html">Back office (login required)</a>
+    </div>
+    <h3>Backup</h3>
     <p class="hint">The inventory is stored online and shared by everyone who opens this app. Export a CSV file to keep your own copy or open it in Excel or Google Sheets. Photos are not included in the CSV file.</p>
     <div class="stack">
       <button type="button" id="exportBtn" class="btn">Export CSV</button>
@@ -195,6 +199,7 @@
   <script src="vendor/barcode-detector.js"></script>
   <script src="vendor/supabase.js"></script>
   <script src="config.js"></script>
+  <script src="common.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
