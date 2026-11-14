@@ -618,7 +618,22 @@ async function loadCodes() {
       toast(e ? explain(e, 'Could not delete the passcode.') : 'Passcode deleted');
       loadCodes();
     });
-    actions.append(copy, del);
+    // Switch an existing passcode between view-only and cashier.
+    const kind = el('select');
+    kind.setAttribute('aria-label', `What passcode ${c.code} can do`);
+    for (const [value, name] of [['view', 'View only'], ['cashier', 'Cashier']]) {
+      const opt = el('option', '', name);
+      opt.value = value;
+      opt.selected = value === c.kind;
+      kind.append(opt);
+    }
+    kind.addEventListener('change', async () => {
+      const { data: changed, error: e } = await sb.from('access_codes').update({ kind: kind.value }).eq('id', c.id).select('id');
+      toast(e || !changed.length ? explain(e, 'Could not change the passcode.')
+        : kind.value === 'cashier' ? `${c.code} can now record sales` : `${c.code} is now view only`);
+      loadCodes();
+    });
+    actions.append(kind, copy, del);
     li.append(main, actions);
     list.append(li);
   }
