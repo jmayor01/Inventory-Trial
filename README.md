@@ -35,7 +35,8 @@ Codabar, QR and Data Matrix.
 | Visitor | Can do |
 | --- | --- |
 | Anyone with the link | Look up one product by scanning or typing its exact barcode, and see its details |
-| With a passcode | Also view and search the whole list of items (read-only) |
+| With a view-only passcode | Also view and search the whole list of items (read-only) |
+| With a cashier passcode | Also sell: add items to a cart and confirm the sale, which takes them out of stock |
 | **Admin** (signed in) | Add, change and delete items, change stock, generate barcodes, import and export CSV, original prices and profit, passcodes |
 | **Super admin** (signed in) | Everything an admin can, plus user accounts |
 
@@ -52,10 +53,14 @@ Open **Menu → Staff sign in**, or go to `/admin.html`.
   cost you) and a **market price** (what it sells for). The page shows expected
   profit, margin, and the stock valued at both prices. *Expected profit* is what
   you earn if all current stock sells at its market price; sales are not recorded.
+- **Sales** — what cashiers actually sold: profit, sales total, number of sales
+  and items for today, the last 7 or 30 days, or all time, with every sale
+  listed. A sale can be cancelled, which puts its items back in stock.
 - **Users** (super admin) — create admin or super admin accounts, change a
   role, remove an account.
-- **Passcodes** — create and delete the codes that let people
-  without an account view the list of items.
+- **Passcodes** — create and delete the codes for people without an account:
+  *view only*, or *cashier*, which can also record sales. Give each cashier
+  their own so their sales can be told apart.
 - **Export CSV** — with original price and profit columns.
 
 Once signed in, the inventory app itself also unlocks adding, editing, stock

@@ -1,7 +1,7 @@
 'use strict';
 
 // The back office. Needs a sign-in, and what it shows depends on the role:
-//   admin       - products, original prices and profit, passcodes, export
+//   admin       - products, original prices and profit, sales, passcodes, export
 //   super admin - the same, plus user accounts
 // The database enforces these rules (supabase/setup.sql); hiding things here
 // is only so that people are not shown buttons that would be refused.
@@ -170,7 +170,7 @@ function render() {
   $('countAll').textContent = loaded ? String(items.length) : '';
   $('countNoCost').textContent = loaded ? String(missing) : '';
   $('countLoss').textContent = loaded ? String(items.filter(isLoss).length) : '';
-  for (const chip of document.querySelectorAll('.chip')) chip.setAttribute('aria-pressed', String(chip.dataset.filter === filter));
+  for (const chip of document.querySelectorAll('.chip[data-filter]')) chip.setAttribute('aria-pressed', String(chip.dataset.filter === filter));
 
   const filtering = Boolean(q) || filter !== 'all';
   $('summary').textContent = loaded && filtering && items.length
@@ -185,7 +185,7 @@ function render() {
   }
 }
 
-for (const chip of document.querySelectorAll('.chip')) {
+for (const chip of document.querySelectorAll('.chip[data-filter]')) {
   chip.addEventListener('click', () => { filter = chip.dataset.filter; render(); });
 }
 $('search').addEventListener('input', render);
@@ -367,6 +367,7 @@ function showTab(name) {
   currentTab = name === 'users' && !isSuper() ? 'products' : name; // only the super admin manages users
   for (const tab of document.querySelectorAll('.tab')) tab.setAttribute('aria-selected', String(tab.dataset.tab === currentTab));
   for (const panel of document.querySelectorAll('.tabpanel')) panel.hidden = panel.id !== `tab-${currentTab}`;
+  if (currentTab === 'sales') loadSales();
   if (currentTab === 'users') loadUsers();
   if (currentTab === 'codes') loadCodes();
 }
@@ -375,6 +376,105 @@ for (const tab of document.querySelectorAll('.tab')) tab.addEventListener('click
 function showError(id, message) {
   $(id).textContent = message;
   $(id).hidden = !message;
+}
+
+// ---------- Sales ----------
+// What cashiers actually sold, and the profit on it. Each sale line carries the
+// market and original price as they were at the time of the sale.
+
+let salesPeriod = 'today';
+const SALES_LIMIT = 1000;
+
+function periodStart() {
+  const now = new Date();
+  if (salesPeriod === 'today') return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (salesPeriod === 'all') return null;
+  return new Date(now.getTime() - Number(salesPeriod) * 24 * 60 * 60 * 1000);
+}
+
+async function loadSales() {
+  for (const chip of document.querySelectorAll('.chip[data-period]')) chip.setAttribute('aria-pressed', String(chip.dataset.period === salesPeriod));
+  const forPeriod = salesPeriod;
+  let query = sb.from('sales')
+    .select('id,created_at,sold_by,total,voided_at,voided_by,sale_lines(name,qty,price,cost)')
+    .order('created_at', { ascending: false })
+    .limit(SALES_LIMIT);
+  const from = periodStart();
+  if (from) query = query.gte('created_at', from.toISOString());
+  const { data, error } = await query;
+  if (forPeriod !== salesPeriod || currentTab !== 'sales') return;
+  if (error) { setStatus(explain(error, 'Could not load the sales.')); return; }
+  setStatus('');
+
+  let revenue = 0, profit = 0, units = 0, count = 0, uncosted = 0;
+  const list = $('salesList');
+  list.replaceChildren();
+  for (const sale of data) {
+    const lines = sale.sale_lines || [];
+    let saleProfit = 0, saleUncosted = 0;
+    for (const l of lines) {
+      if (l.cost == null) saleUncosted += l.qty; else saleProfit += (Number(l.price) - Number(l.cost)) * l.qty;
+    }
+    const voided = Boolean(sale.voided_at);
+    if (!voided) {
+      count += 1;
+      revenue += Number(sale.total);
+      profit += saleProfit;
+      uncosted += saleUncosted;
+      units += lines.reduce((sum, l) => sum + l.qty, 0);
+    }
+
+    const li = el('li', 'row-card');
+    const main = el('div', 'row-main');
+    const when = new Date(sale.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    const title = el('div', 'row-title', `${money.format(Number(sale.total))} · ${sale.sold_by || 'Cashier'}`);
+    if (voided) { title.classList.add('struck'); title.append(' ', el('span', 'badge out', 'Cancelled')); }
+    main.append(title);
+    main.append(el('div', 'hint', lines.map((l) => `${l.qty} × ${l.name}`).join(', ')));
+    const detail = voided
+      ? `${when} · cancelled${sale.voided_by ? ` by ${sale.voided_by}` : ''}`
+      : `${when} · profit ${signed(saleProfit)}${saleUncosted ? ' (some items had no original price)' : ''}`;
+    main.append(el('div', 'hint', detail));
+    li.append(main);
+    if (!voided) {
+      const actions = el('div', 'row-actions');
+      const cancel = el('button', 'btn danger', 'Cancel sale');
+      cancel.type = 'button';
+      cancel.setAttribute('aria-label', `Cancel the sale of ${money.format(Number(sale.total))} made ${when}`);
+      cancel.addEventListener('click', async () => {
+        const yes = await confirmDialog({
+          title: 'Cancel this sale?',
+          text: 'Its items go back into stock and it no longer counts towards sales and profit. This cannot be undone.',
+          ok: 'Cancel sale',
+          danger: true,
+        });
+        if (!yes) return;
+        cancel.disabled = true;
+        const { error: e } = await sb.rpc('void_sale', { p_sale_id: sale.id });
+        toast(e ? (e.code === 'P0001' ? e.message : explain(e, 'Could not cancel the sale.')) : 'Sale cancelled and stock restored');
+        loadSales();
+        refreshQuietly();
+      });
+      actions.append(cancel);
+      li.append(actions);
+    }
+    list.append(li);
+  }
+
+  $('salesProfit').textContent = signed(profit);
+  $('salesProfit').classList.toggle('negative', profit < 0);
+  $('salesRevenue').textContent = money.format(revenue);
+  $('salesCount').textContent = String(count);
+  $('salesUnits').textContent = String(units);
+  const notes = [];
+  if (uncosted) notes.push(`${uncosted} sold item${uncosted === 1 ? ' had' : 's had'} no original price and ${uncosted === 1 ? 'is' : 'are'} left out of the profit.`);
+  if (data.length === SALES_LIMIT) notes.push(`Only the latest ${SALES_LIMIT} sales are shown; choose a shorter period for exact totals.`);
+  $('salesNote').textContent = notes.join(' ');
+  $('salesEmpty').hidden = data.length > 0;
+}
+
+for (const chip of document.querySelectorAll('.chip[data-period]')) {
+  chip.addEventListener('click', () => { salesPeriod = chip.dataset.period; loadSales(); });
 }
 
 // ---------- Users (super admin) ----------
@@ -479,7 +579,7 @@ function randomCode() {
 }
 
 async function loadCodes() {
-  const { data, error } = await sb.from('access_codes').select('id,code,label,created_at').order('created_at');
+  const { data, error } = await sb.from('access_codes').select('id,code,label,kind,created_at').order('created_at');
   if (error) { setStatus(explain(error, 'Could not load the passcodes.')); return; }
   const list = $('codeList');
   list.replaceChildren();
@@ -487,7 +587,10 @@ async function loadCodes() {
   for (const c of data) {
     const li = el('li', 'row-card');
     const main = el('div', 'row-main');
-    main.append(el('div', 'code-value', c.code), el('div', 'hint', c.label || 'No note'));
+    const kindBadge = el('span', c.kind === 'cashier' ? 'badge low' : 'badge plain', c.kind === 'cashier' ? 'Cashier' : 'View only');
+    const note = el('div', 'hint', c.label ? `${c.label} · ` : '');
+    note.append(kindBadge);
+    main.append(el('div', 'code-value', c.code), note);
     const actions = el('div', 'row-actions');
     const copy = el('button', 'btn', 'Copy');
     copy.type = 'button';
@@ -506,7 +609,7 @@ async function loadCodes() {
     del.addEventListener('click', async () => {
       const yes = await confirmDialog({
         title: `Delete passcode ${c.code}?`,
-        text: 'Anyone using it will lose access to the list of items the next time the app reloads.',
+        text: 'Anyone using it will lose access the next time the app reloads. Sales already made with it stay in the records.',
         ok: 'Delete',
         danger: true,
       });
@@ -529,7 +632,7 @@ $('codeForm').addEventListener('submit', async (e) => {
   showError('codeError', '');
   if (!/^[A-Z0-9]{6,64}$/.test(code)) { showError('codeError', 'Use 6 or more letters and numbers, with no spaces.'); $('cCode').focus(); return; }
   $('codeSave').disabled = true;
-  const { error } = await sb.from('access_codes').insert({ code, label: $('cLabel').value.trim() });
+  const { error } = await sb.from('access_codes').insert({ code, label: $('cLabel').value.trim(), kind: $('cKind').value });
   $('codeSave').disabled = false;
   if (error) { showError('codeError', error.code === '23505' ? 'That passcode already exists.' : explain(error, 'Could not create the passcode.')); return; }
   $('cLabel').value = '';

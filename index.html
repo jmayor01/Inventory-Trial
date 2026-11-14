@@ -90,12 +90,40 @@
 
   <nav class="actions" aria-label="Main actions">
     <button id="addBtn" class="btn" data-show="staff"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add</span></button>
-    <button id="scanBtn" class="btn primary"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 8v8M11 8v8M14 8v8M17 8v8"/></svg><span>Scan barcode</span></button>
+    <button id="scanBtn" class="btn primary"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 8v8M11 8v8M14 8v8M17 8v8"/></svg><span id="scanBtnText">Scan barcode</span></button>
+    <button id="cartBtn" class="btn primary" data-cashier><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.4 11h10.2L20 7H6.2"/><circle cx="9" cy="19" r="1.5"/><circle cx="17" cy="19" r="1.5"/></svg><span id="cartBtnText">Cart</span></button>
   </nav>
 
   <!-- Item details -->
   <dialog id="detailDlg" aria-label="Item details">
     <div id="detailBody"></div>
+  </dialog>
+
+  <!-- Cashier: the cart, and the receipt after a sale -->
+  <dialog id="cartDlg" aria-labelledby="cartTitle">
+    <div id="cartView">
+      <h2 id="cartTitle" tabindex="-1">Cart</h2>
+      <p id="cartEmpty" class="hint" hidden>The cart is empty. Scan a barcode or tap <strong>Add</strong> next to an item.</p>
+      <ul id="cartLines" class="cart-lines"></ul>
+      <div id="cartTotalRow" class="cart-total"><span>Total</span><strong id="cartTotal"></strong></div>
+      <p id="cartError" class="error" role="alert" hidden></p>
+      <div class="dlg-actions">
+        <button type="button" id="cartClear" class="btn danger">Empty cart</button>
+        <span class="spacer"></span>
+        <button type="button" id="cartClose" class="btn">Keep adding</button>
+        <button type="button" id="cartConfirm" class="btn primary">Confirm sale</button>
+      </div>
+    </div>
+    <div id="receiptView" hidden>
+      <h2 id="receiptTitle" tabindex="-1">Sale recorded</h2>
+      <p class="hint">The items have been taken out of stock.</p>
+      <ul id="receiptLines" class="cart-lines"></ul>
+      <div class="cart-total"><span>Total</span><strong id="receiptTotal"></strong></div>
+      <div class="dlg-actions">
+        <span class="spacer"></span>
+        <button type="button" id="receiptDone" class="btn primary">New sale</button>
+      </div>
+    </div>
   </dialog>
 
   <!-- Add / edit item -->
@@ -175,7 +203,7 @@
   <dialog id="menuDlg" aria-labelledby="menuTitle">
     <h2 id="menuTitle">Menu</h2>
     <p class="hint" data-show="staff">Signed in as <strong id="accountEmail"></strong> (<span id="accountRole"></span>)</p>
-    <p class="hint" data-show="viewer">You are viewing the list with a passcode.</p>
+    <p class="hint" data-show="viewer" id="viewerNote">You are viewing the list with a passcode.</p>
     <div class="stack">
       <a class="btn" href="admin.html" data-show="staff">Back office</a>
       <a class="btn" href="admin.html" data-show="public viewer">Staff sign in</a>

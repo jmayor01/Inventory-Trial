@@ -5,6 +5,7 @@
 -- Who can do what (enforced here, not just in the app):
 --   Nobody signed in  -> look up one item by its exact barcode
 --   With a passcode   -> also view the whole list of items
+--   Cashier passcode  -> also sell: take items out of stock through a recorded sale
 --   Admin             -> add, change and delete items, change stock, import,
 --                        original prices and profit, passcodes
 --   Super admin       -> everything an admin can, plus user accounts
@@ -89,6 +90,38 @@ create table if not exists public.access_codes (
   created_at timestamptz not null default now()
 );
 
+-- A passcode is either for viewing only or for a cashier, who can also sell.
+alter table public.access_codes
+  add column if not exists kind text not null default 'view' check (kind in ('view', 'cashier'));
+
+-- Sales ---------------------------------------------------------------------------
+-- A sale is made with a cashier passcode through record_sale() below. Each line
+-- keeps the name, price and original price as they were at that moment, so the
+-- history and the profit stay right when an item is later changed or deleted.
+
+create table if not exists public.sales (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  code_id uuid references public.access_codes (id) on delete set null,
+  sold_by text not null default '',
+  total numeric(14, 2) not null default 0,
+  voided_at timestamptz,
+  voided_by text
+);
+create index if not exists sales_created_at on public.sales (created_at desc);
+
+create table if not exists public.sale_lines (
+  id uuid primary key default gen_random_uuid(),
+  sale_id uuid not null references public.sales (id) on delete cascade,
+  item_id uuid references public.items (id) on delete set null,
+  name text not null,
+  barcode text not null default '',
+  qty integer not null check (qty > 0),
+  price numeric(12, 2) not null,
+  cost numeric(12, 2)
+);
+create index if not exists sale_lines_sale_id on public.sale_lines (sale_id);
+
 -- Access rules ------------------------------------------------------------------
 
 alter table public.items enable row level security;
@@ -96,6 +129,8 @@ alter table public.item_photos enable row level security;
 alter table public.item_costs enable row level security;
 alter table public.profiles enable row level security;
 alter table public.access_codes enable row level security;
+alter table public.sales enable row level security;
+alter table public.sale_lines enable row level security;
 
 drop policy if exists "Signed-in users can use items" on public.items;
 drop policy if exists "Anyone can use items" on public.items;
@@ -131,6 +166,19 @@ drop policy if exists "Super admin can use passcodes" on public.access_codes;
 drop policy if exists "Staff can use passcodes" on public.access_codes;
 create policy "Staff can use passcodes" on public.access_codes
   for all to authenticated using (public.is_staff()) with check (public.is_staff());
+
+-- Staff can read sales. Nobody writes them directly: record_sale() and
+-- void_sale() below are the only way in.
+drop policy if exists "Staff can read sales" on public.sales;
+create policy "Staff can read sales" on public.sales
+  for select to authenticated using (public.is_staff());
+
+drop policy if exists "Staff can read sale lines" on public.sale_lines;
+create policy "Staff can read sale lines" on public.sale_lines
+  for select to authenticated using (public.is_staff());
+
+revoke all on public.sales, public.sale_lines from anon, authenticated;
+grant select on public.sales, public.sale_lines to authenticated;
 
 revoke all on public.items, public.item_photos, public.item_costs, public.profiles, public.access_codes from anon;
 grant select, insert, update, delete on public.items, public.item_photos, public.item_costs, public.access_codes to authenticated;
@@ -188,6 +236,98 @@ begin
      where p.item_id = any (p_ids[1:20])
   ), '[]'::jsonb);
 end $$;
+
+-- What kind of passcode this is: 'view', 'cashier', or null when it is not valid.
+create or replace function public.access_code_kind(p_code text)
+returns text language sql stable security definer set search_path = '' as $$
+  select kind from public.access_codes where code = upper(trim(coalesce(p_code, '')));
+$$;
+
+-- Records a sale made with a cashier passcode and takes the items out of stock.
+-- p_lines is a JSON array of {"item_id": "...", "qty": 2}. Prices come from the
+-- database, never from the caller, and nothing is sold beyond what is in stock.
+create or replace function public.record_sale(p_code text, p_lines jsonb)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  v_code public.access_codes%rowtype;
+  v_sale_id uuid := gen_random_uuid();
+  v_total numeric(14, 2) := 0;
+  v_line record;
+  v_item public.items%rowtype;
+begin
+  select * into v_code from public.access_codes
+   where code = upper(trim(coalesce(p_code, ''))) and kind = 'cashier';
+  if not found then
+    raise exception 'invalid passcode' using errcode = '28000';
+  end if;
+  if p_lines is null or jsonb_typeof(p_lines) <> 'array' or jsonb_array_length(p_lines) = 0 then
+    raise exception 'The cart is empty.' using errcode = 'P0001';
+  end if;
+  if jsonb_array_length(p_lines) > 200 then
+    raise exception 'That is too many items for one sale.' using errcode = 'P0001';
+  end if;
+
+  insert into public.sales (id, code_id, sold_by)
+  values (v_sale_id, v_code.id, coalesce(nullif(trim(v_code.label), ''), 'Cashier'));
+
+  -- The same item twice in the cart counts once; a fixed order avoids two
+  -- sales locking each other.
+  for v_line in
+    select (l ->> 'item_id')::uuid as item_id, sum((l ->> 'qty')::integer)::integer as qty
+      from jsonb_array_elements(p_lines) l
+     group by 1 order by 1
+  loop
+    if v_line.item_id is null or v_line.qty is null or v_line.qty <= 0 then
+      raise exception 'Every quantity must be 1 or more.' using errcode = 'P0001';
+    end if;
+    select * into v_item from public.items where id = v_line.item_id for update;
+    if not found then
+      raise exception 'An item in the cart no longer exists. Remove it and try again.' using errcode = 'P0001';
+    end if;
+    if v_item.qty < v_line.qty then
+      raise exception 'Only % left of "%".', v_item.qty, v_item.name using errcode = 'P0001';
+    end if;
+    update public.items set qty = qty - v_line.qty where id = v_item.id;
+    insert into public.sale_lines (sale_id, item_id, name, barcode, qty, price, cost)
+    values (v_sale_id, v_item.id, v_item.name, v_item.barcode, v_line.qty, v_item.price,
+            (select c.cost from public.item_costs c where c.item_id = v_item.id));
+    v_total := v_total + v_item.price * v_line.qty;
+  end loop;
+
+  update public.sales set total = v_total where id = v_sale_id;
+  return jsonb_build_object('sale_id', v_sale_id, 'total', v_total);
+end $$;
+
+-- Cancels a sale and puts its items back in stock. Staff only.
+create or replace function public.void_sale(p_sale_id uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_sale public.sales%rowtype;
+begin
+  if not public.is_staff() then
+    raise exception 'permission denied' using errcode = '42501';
+  end if;
+  select * into v_sale from public.sales where id = p_sale_id for update;
+  if not found then
+    raise exception 'That sale no longer exists.' using errcode = 'P0001';
+  end if;
+  if v_sale.voided_at is not null then
+    raise exception 'That sale was already cancelled.' using errcode = 'P0001';
+  end if;
+  update public.items i set qty = i.qty + l.qty
+    from (select item_id, sum(qty)::integer as qty from public.sale_lines
+           where sale_id = p_sale_id and item_id is not null group by item_id) l
+   where i.id = l.item_id;
+  update public.sales
+     set voided_at = now(),
+         voided_by = coalesce((select email from public.profiles where user_id = (select auth.uid())), '')
+   where id = p_sale_id;
+end $$;
+
+revoke all on function public.access_code_kind(text), public.record_sale(text, jsonb) from public;
+grant execute on function public.access_code_kind(text), public.record_sale(text, jsonb) to anon, authenticated;
+revoke all on function public.void_sale(uuid) from public, anon;
+grant execute on function public.void_sale(uuid) to authenticated;
 
 revoke all on function public.my_role(), public.is_staff(), public.is_super_admin() from public, anon;
 grant execute on function public.my_role(), public.is_staff(), public.is_super_admin() to authenticated;

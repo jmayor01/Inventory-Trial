@@ -50,6 +50,7 @@
     <p class="hint whoami">Signed in as <strong id="whoEmail"></strong> · <span id="whoRole"></span></p>
     <div class="tabs" role="tablist" aria-label="Back office sections">
       <button type="button" class="tab" role="tab" data-tab="products" aria-selected="true">Products</button>
+      <button type="button" class="tab" role="tab" data-tab="sales" aria-selected="false">Sales</button>
       <button type="button" class="tab" role="tab" data-tab="users" aria-selected="false" data-role="super_admin">Users</button>
       <button type="button" class="tab" role="tab" data-tab="codes" aria-selected="false">Passcodes</button>
     </div>
@@ -103,6 +104,24 @@
     </div>
     </div>
 
+    <div id="tab-sales" class="tabpanel" hidden>
+      <div class="chips periods" role="group" aria-label="Period">
+        <button type="button" class="chip" data-period="today" aria-pressed="true">Today</button>
+        <button type="button" class="chip" data-period="7" aria-pressed="false">Last 7 days</button>
+        <button type="button" class="chip" data-period="30" aria-pressed="false">Last 30 days</button>
+        <button type="button" class="chip" data-period="all" aria-pressed="false">All time</button>
+      </div>
+      <section class="stats profit-stats sales-stats" aria-label="Sales summary">
+        <div class="stat highlight"><span class="stat-value" id="salesProfit">–</span><span class="stat-label">Profit from sales</span></div>
+        <div class="stat"><span class="stat-value" id="salesRevenue">–</span><span class="stat-label">Sales total</span></div>
+        <div class="stat"><span class="stat-value" id="salesCount">–</span><span class="stat-label">Sales</span></div>
+        <div class="stat"><span class="stat-value" id="salesUnits">–</span><span class="stat-label">Items sold</span></div>
+      </section>
+      <p class="hint profit-note">Profit is the market price minus the original price of what was actually sold. <span id="salesNote"></span></p>
+      <ul id="salesList" class="list plain"></ul>
+      <div id="salesEmpty" class="empty" hidden><p class="empty-title">No sales in this period</p><p>Sales appear here when a cashier confirms a cart.</p></div>
+    </div>
+
     <div id="tab-users" class="tabpanel" hidden>
       <h2 class="section-title">Users</h2>
       <p class="hint">An <strong>admin</strong> can do everything in the back office except manage user accounts. Only a <strong>super admin</strong> can add users, change roles and remove accounts.</p>
@@ -125,7 +144,7 @@
 
     <div id="tab-codes" class="tabpanel" hidden>
       <h2 class="section-title">Passcodes</h2>
-      <p class="hint">Without a passcode, someone who opens the app link can only look up one product at a time by its barcode. Give a passcode to people who should see the whole list of items. Delete a passcode to stop it working.</p>
+      <p class="hint">Without a passcode, someone who opens the app link can only look up one product at a time by its barcode. A <strong>view-only</strong> passcode shows the whole list of items. A <strong>cashier</strong> passcode can also sell: it takes items out of stock through a recorded sale. Give each cashier their own passcode so you can tell their sales apart. Delete a passcode to stop it working.</p>
       <ul id="codeList" class="list plain"></ul>
       <form id="codeForm" class="card-form" novalidate>
         <h3>Create a passcode</h3>
@@ -134,8 +153,13 @@
           <input id="cCode" autocomplete="off" autocapitalize="characters" spellcheck="false" minlength="6" maxlength="64" required>
           <button id="cRandom" type="button" class="btn">New code</button>
         </div>
+        <label for="cKind">What can it do?</label>
+        <select id="cKind">
+          <option value="view">View only — see the list of items</option>
+          <option value="cashier">Cashier — see the list and record sales</option>
+        </select>
         <label for="cLabel">Who is it for? <span class="optional">optional</span></label>
-        <input id="cLabel" autocomplete="off" maxlength="80" placeholder="e.g. Sales staff">
+        <input id="cLabel" autocomplete="off" maxlength="80" placeholder="e.g. the cashier's name">
         <p id="codeError" class="error" role="alert" hidden></p>
         <button id="codeSave" type="submit" class="btn primary">Create passcode</button>
       </form>

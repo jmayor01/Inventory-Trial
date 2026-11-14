@@ -6,11 +6,14 @@
 // What a visitor can do depends on `mode`, and the database enforces the same
 // rules (supabase/setup.sql), so nothing here is the real lock:
 //   public - not signed in, no passcode: look up one item by its barcode
-//   viewer - holds a passcode: sees the whole list, read-only
+//   viewer - holds a passcode: sees the whole list, read-only. With a cashier
+//            passcode (`cashier` is true) they can also sell from a cart.
 //   staff  - signed in as admin or super admin: can change everything
 
 const CACHE_KEY = 'inventory.cache.v3';
 const PASSCODE_KEY = 'inventory.passcode';
+const PASSCODE_KIND_KEY = 'inventory.passcodeKind'; // 'view' | 'cashier'
+const CART_KEY = 'inventory.cart';
 const ROLE_KEY = 'inventory.role'; // last known role, so staff can open the app offline
 const LEGACY_KEY = 'inventory.items.v1'; // items from before the inventory was shared
 
@@ -23,6 +26,8 @@ let loaded = false; // false until the list has come from the server or the offl
 let mode = 'boot'; // 'boot' | 'public' | 'viewer' | 'staff'
 let role = null; // 'admin' | 'super_admin' when mode is 'staff'
 let passcode = ''; // the passcode in use when mode is 'viewer'
+let cashier = false; // true when that passcode is a cashier's
+let cart = new Map(); // item id -> quantity, for the sale being rung up
 // The public barcode lookup: state is 'idle' | 'loading' | 'found' | 'missing' | 'error'.
 let lookup = { state: 'idle', code: '', item: null, message: '' };
 
@@ -48,6 +53,12 @@ function writeCache() {
 }
 
 /** Removes everything this device remembers about the inventory. */
+function forgetPasscode() {
+  stored.remove(PASSCODE_KEY);
+  stored.remove(PASSCODE_KIND_KEY);
+  forgetInventory();
+}
+
 function forgetInventory() {
   stored.remove(CACHE_KEY);
   clearPhotoCache();
@@ -94,8 +105,7 @@ async function refreshQuietly() {
     if (forMode !== mode) return;
     if (mode === 'viewer' && e && e.code === '28000') {
       // The super admin removed this passcode.
-      stored.remove(PASSCODE_KEY);
-      forgetInventory();
+      forgetPasscode();
       enterPublic();
       toast('That passcode no longer works.');
       return;
@@ -125,9 +135,14 @@ function setRealtime(on) {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleRefresh(); });
 window.addEventListener('online', scheduleRefresh);
 
-function setMode(next) {
+function setMode(next, sell) {
   mode = next;
+  cashier = next === 'viewer' && Boolean(sell);
   document.body.dataset.mode = next;
+  document.body.toggleAttribute('data-sell', cashier);
+  $('scanBtnText').textContent = cashier ? 'Scan' : 'Scan barcode';
+  $('viewerNote').textContent = cashier ? 'You are signed in with a cashier passcode.' : 'You are viewing the list with a passcode.';
+  if (cashier) loadCart(); else clearCart();
   setStatus('');
   for (const d of document.querySelectorAll('dialog[open]')) d.close();
   // Passcode viewers get photos through the passcode, staff straight from the table.
@@ -150,10 +165,10 @@ function enterPublic() {
   setMode('public');
 }
 
-function enterViewer(code) {
+function enterViewer(code, kind) {
   role = null;
   passcode = code;
-  setMode('viewer');
+  setMode('viewer', kind === 'cashier');
   refreshQuietly();
 }
 
@@ -303,6 +318,13 @@ function detailCard(it, inDialog) {
   });
   actions.append(back);
   if (isStaff()) actions.append(edit);
+  if (cashier) {
+    const add = el('button', 'btn primary', 'Add to cart');
+    add.type = 'button';
+    add.disabled = (cart.get(it.id) || 0) >= it.qty;
+    add.addEventListener('click', () => { addToCart(it); if (inDialog) $('detailDlg').close(); });
+    actions.append(add);
+  }
   card.append(actions);
   return card;
 }
@@ -333,6 +355,14 @@ function itemRow(it) {
   main.addEventListener('click', () => openDetails(it));
 
   li.append(main, isStaff() ? qtyControls(it) : qtyText(it));
+  if (cashier) {
+    const add = el('button', 'add-cart', 'Add');
+    add.type = 'button';
+    add.setAttribute('aria-label', `Add ${it.name} to the cart`);
+    add.disabled = (cart.get(it.id) || 0) >= it.qty;
+    add.addEventListener('click', () => addToCart(it));
+    li.append(add);
+  }
   return li;
 }
 
@@ -382,6 +412,8 @@ function render() {
       : raw === scannedQuery ? `No item has barcode ${raw}.` : `No item matches "${raw}".`;
     $('noResultsAdd').hidden = !q || !isStaff();
   }
+
+  if (cashier) updateCartButton();
 
   // Keep an open details dialog in step with the data.
   if ($('detailDlg').open) {
@@ -515,7 +547,9 @@ $('scanBtn').addEventListener('click', () =>
   openScanner((code) => {
     if (mode === 'public') { lookupBarcode(code); return; }
     const found = items.find((x) => x.barcode === code);
-    if (found) {
+    if (found && cashier) {
+      addToCart(found); // a cashier scans straight into the cart
+    } else if (found) {
       openDetails(found);
     } else if (isStaff()) {
       toast('New barcode — add the item details');
@@ -554,6 +588,161 @@ $('noResultsAdd').addEventListener('click', () => {
   openItem(null, raw === scannedQuery ? raw : '');
 });
 
+// ---------- Cashier: cart and sale ----------
+// A cashier passcode can take items out of stock, but only by recording a sale.
+// The database works out the prices and refuses to sell more than is in stock;
+// the cart here is just what the cashier has rung up so far.
+
+function saveCart() {
+  try { sessionStorage.setItem(CART_KEY, JSON.stringify([...cart])); } catch { /* cart then lasts until reload */ }
+  updateCartButton();
+}
+
+function loadCart() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(CART_KEY));
+    cart = new Map(Array.isArray(saved) ? saved.filter(([id, qty]) => typeof id === 'string' && Number.isInteger(qty) && qty > 0) : []);
+  } catch {
+    cart = new Map();
+  }
+  updateCartButton();
+}
+
+function clearCart() {
+  cart = new Map();
+  try { sessionStorage.removeItem(CART_KEY); } catch { /* ignore */ }
+  updateCartButton();
+}
+
+/** Cart lines for items that still exist, in the order they were added. */
+function cartLines() {
+  const lines = [];
+  for (const [id, qty] of cart) {
+    const item = items.find((x) => x.id === id);
+    if (item) lines.push({ item, qty, total: item.price * qty });
+  }
+  return lines;
+}
+
+function updateCartButton() {
+  const lines = cartLines();
+  const count = lines.reduce((sum, l) => sum + l.qty, 0);
+  const total = lines.reduce((sum, l) => sum + l.total, 0);
+  $('cartBtnText').textContent = count ? `Cart (${count}) · ${money.format(total)}` : 'Cart';
+}
+
+function addToCart(it) {
+  const inCart = cart.get(it.id) || 0;
+  if (it.qty <= 0) { toast(`${it.name} is out of stock`); return; }
+  if (inCart >= it.qty) { toast(`Only ${it.qty} of ${it.name} in stock`); return; }
+  cart.set(it.id, inCart + 1);
+  saveCart();
+  render();
+  toast(`Added ${it.name} (${inCart + 1} in cart)`);
+}
+
+function setCartQty(id, qty) {
+  if (qty <= 0) cart.delete(id); else cart.set(id, qty);
+  saveCart();
+  render();
+  renderCart();
+}
+
+function cartLineRow(line, editable) {
+  const { item, qty, total } = line;
+  const li = el('li', 'cart-line');
+  const info = el('div');
+  info.append(el('div', 'line-name', item.name), el('div', 'line-sub', `${qty} × ${money.format(item.price)}`));
+  li.append(info, el('div', 'line-total', money.format(total)));
+  if (!editable) return li;
+
+  const controls = el('div', 'line-controls');
+  const stepper = el('div', 'qty');
+  const minus = el('button', '', '−');
+  minus.type = 'button';
+  minus.setAttribute('aria-label', `One less ${item.name}`);
+  minus.addEventListener('click', () => setCartQty(item.id, qty - 1));
+  const out = el('output', '', String(qty));
+  out.setAttribute('aria-label', `${qty} in cart`);
+  const plus = el('button', '', '+');
+  plus.type = 'button';
+  plus.setAttribute('aria-label', `One more ${item.name}`);
+  plus.disabled = qty >= item.qty;
+  plus.addEventListener('click', () => setCartQty(item.id, qty + 1));
+  stepper.append(minus, out, plus);
+  const remove = el('button', 'remove', 'Remove');
+  remove.type = 'button';
+  remove.setAttribute('aria-label', `Remove ${item.name} from the cart`);
+  remove.addEventListener('click', () => setCartQty(item.id, 0));
+  controls.append(stepper, remove);
+  li.append(controls);
+  if (qty > item.qty) li.append(el('div', 'line-warn', item.qty > 0 ? `Only ${item.qty} left in stock` : 'Now out of stock'));
+  return li;
+}
+
+function renderCart() {
+  const lines = cartLines();
+  $('cartLines').replaceChildren(...lines.map((l) => cartLineRow(l, true)));
+  $('cartEmpty').hidden = lines.length > 0;
+  $('cartTotalRow').hidden = lines.length === 0;
+  $('cartTotal').textContent = money.format(lines.reduce((sum, l) => sum + l.total, 0));
+  $('cartConfirm').disabled = lines.length === 0;
+  $('cartClear').hidden = lines.length === 0;
+}
+
+function showCartError(message) {
+  $('cartError').textContent = message;
+  $('cartError').hidden = !message;
+}
+
+$('cartBtn').addEventListener('click', () => {
+  $('cartView').hidden = false;
+  $('receiptView').hidden = true;
+  showCartError('');
+  renderCart();
+  $('cartDlg').showModal();
+  $('cartTitle').focus();
+});
+$('cartClose').addEventListener('click', () => $('cartDlg').close());
+$('cartClear').addEventListener('click', () => { clearCart(); render(); renderCart(); });
+$('receiptDone').addEventListener('click', () => $('cartDlg').close());
+
+$('cartConfirm').addEventListener('click', async () => {
+  const lines = cartLines();
+  if (!lines.length || !cashier) return;
+  showCartError('');
+  $('cartConfirm').disabled = true;
+  $('cartConfirm').textContent = 'Recording…';
+  const { data, error } = await sb.rpc('record_sale', {
+    p_code: passcode,
+    p_lines: lines.map((l) => ({ item_id: l.item.id, qty: l.qty })),
+  });
+  $('cartConfirm').textContent = 'Confirm sale';
+  $('cartConfirm').disabled = false;
+
+  if (error) {
+    // P0001 carries a message written for the cashier, e.g. 'Only 2 left of "Soap".'
+    showCartError(error.code === 'P0001' ? error.message
+      : error.code === '28000' ? 'This passcode can no longer record sales. Ask an admin for a new one.'
+      : explain(error, 'The sale was not recorded. Please try again.'));
+    await refreshQuietly(); // stock may have changed under us
+    if (mode === 'viewer') renderCart();
+    return;
+  }
+
+  // Take the sold quantities off the list at once; the reload confirms them.
+  for (const l of lines) l.item.qty = Math.max(0, l.item.qty - l.qty);
+  $('receiptLines').replaceChildren(...lines.map((l) => cartLineRow(l, false)));
+  $('receiptTotal').textContent = money.format(Number(data && data.total) || lines.reduce((sum, l) => sum + l.total, 0));
+  clearCart();
+  writeCache();
+  render();
+  $('cartView').hidden = true;
+  $('receiptView').hidden = false;
+  $('receiptTitle').focus();
+  refreshQuietly();
+});
+
 // ---------- Passcode ----------
 
 $('unlockForm').addEventListener('submit', async (e) => {
@@ -563,7 +752,11 @@ $('unlockForm').addEventListener('submit', async (e) => {
   err.hidden = true;
   if (!code) { $('unlockCode').focus(); return; }
   $('unlockBtn').disabled = true;
-  const { data, error } = await sb.rpc('list_items_with_code', { p_code: code });
+  const kindReply = await sb.rpc('access_code_kind', { p_code: code });
+  const kind = kindReply.data;
+  const { data, error } = kindReply.error || !kind
+    ? { data: null, error: kindReply.error || { code: '28000' } }
+    : await sb.rpc('list_items_with_code', { p_code: code });
   $('unlockBtn').disabled = false;
   if (error) {
     err.textContent = error.code === '28000' ? 'That passcode is not right. Check it and try again.' : explain(error, 'Could not check the passcode. Please try again.');
@@ -573,20 +766,20 @@ $('unlockForm').addEventListener('submit', async (e) => {
   if (mode !== 'public') return; // signed in meanwhile
   $('unlockCode').value = '';
   stored.set(PASSCODE_KEY, code);
+  stored.set(PASSCODE_KIND_KEY, kind);
   role = null;
   passcode = code;
-  setMode('viewer');
+  setMode('viewer', kind === 'cashier');
   items = (data || []).map(fromRow);
   loaded = true;
   writeCache();
   render();
   syncPhotos();
-  toast('Unlocked — showing all items');
+  toast(kind === 'cashier' ? 'Unlocked — you can sell from the cart' : 'Unlocked — showing all items');
 });
 
 $('lockBtn').addEventListener('click', () => {
-  stored.remove(PASSCODE_KEY);
-  forgetInventory();
+  forgetPasscode();
   enterPublic();
   toast('Passcode forgotten on this device');
 });
@@ -894,7 +1087,14 @@ async function applySession(session) {
   }
 
   const code = stored.get(PASSCODE_KEY);
-  if (code) enterViewer(code); else enterPublic();
+  if (!code) { enterPublic(); return; }
+  enterViewer(code, stored.get(PASSCODE_KIND_KEY));
+  // The passcode may have been switched between view-only and cashier since.
+  const { data: kind } = await sb.rpc('access_code_kind', { p_code: code });
+  if (kind && mode === 'viewer' && passcode === code && (kind === 'cashier') !== cashier) {
+    stored.set(PASSCODE_KIND_KEY, kind);
+    enterViewer(code, kind);
+  }
 }
 
 // Supabase must not be called from inside this callback, hence the timeout.
