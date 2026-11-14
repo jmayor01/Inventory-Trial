@@ -396,7 +396,7 @@ async function loadSales() {
   for (const chip of document.querySelectorAll('.chip[data-period]')) chip.setAttribute('aria-pressed', String(chip.dataset.period === salesPeriod));
   const forPeriod = salesPeriod;
   let query = sb.from('sales')
-    .select('id,created_at,sold_by,total,voided_at,voided_by,sale_lines(name,qty,price,cost)')
+    .select('id,created_at,sold_by,total,voided_at,voided_by,sale_lines(name,qty,price,list_price,cost)')
     .order('created_at', { ascending: false })
     .limit(SALES_LIMIT);
   const from = periodStart();
@@ -430,7 +430,12 @@ async function loadSales() {
     const title = el('div', 'row-title', `${money.format(Number(sale.total))} · ${sale.sold_by || 'Cashier'}`);
     if (voided) { title.classList.add('struck'); title.append(' ', el('span', 'badge out', 'Cancelled')); }
     main.append(title);
-    main.append(el('div', 'hint', lines.map((l) => `${l.qty} × ${l.name}`).join(', ')));
+    // A line sold at a custom price says so, with the usual price beside it.
+    const isCustom = (l) => l.list_price != null && Number(l.list_price) !== Number(l.price);
+    if (lines.some(isCustom)) title.append(' ', el('span', 'badge low', 'Custom price'));
+    main.append(el('div', 'hint', lines.map((l) => (isCustom(l)
+      ? `${l.qty} × ${l.name} at ${money.format(Number(l.price))} (usual ${money.format(Number(l.list_price))})`
+      : `${l.qty} × ${l.name}`)).join(', ')));
     const detail = voided
       ? `${when} · cancelled${sale.voided_by ? ` by ${sale.voided_by}` : ''}`
       : `${when} · profit ${signed(saleProfit)}${saleUncosted ? ' (some items had no original price)' : ''}`;

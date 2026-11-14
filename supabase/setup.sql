@@ -120,6 +120,9 @@ create table if not exists public.sale_lines (
   price numeric(12, 2) not null,
   cost numeric(12, 2)
 );
+-- price is what the item was actually sold for; list_price is its usual price
+-- at that moment, so a sale at a custom price can be told apart.
+alter table public.sale_lines add column if not exists list_price numeric(12, 2);
 create index if not exists sale_lines_sale_id on public.sale_lines (sale_id);
 
 -- Access rules ------------------------------------------------------------------
@@ -244,8 +247,9 @@ returns text language sql stable security definer set search_path = '' as $$
 $$;
 
 -- Records a sale made with a cashier passcode and takes the items out of stock.
--- p_lines is a JSON array of {"item_id": "...", "qty": 2}. Prices come from the
--- database, never from the caller, and nothing is sold beyond what is in stock.
+-- p_lines is a JSON array of {"item_id": "...", "qty": 2}. A line may add
+-- "price" to sell at a custom price; otherwise the item's own price is used.
+-- Both prices are recorded. Nothing is sold beyond what is in stock.
 create or replace function public.record_sale(p_code text, p_lines jsonb)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
@@ -254,6 +258,7 @@ declare
   v_total numeric(14, 2) := 0;
   v_line record;
   v_item public.items%rowtype;
+  v_price numeric(12, 2);
 begin
   select * into v_code from public.access_codes
    where code = upper(trim(coalesce(p_code, ''))) and kind = 'cashier';
@@ -273,7 +278,8 @@ begin
   -- The same item twice in the cart counts once; a fixed order avoids two
   -- sales locking each other.
   for v_line in
-    select (l ->> 'item_id')::uuid as item_id, sum((l ->> 'qty')::integer)::integer as qty
+    select (l ->> 'item_id')::uuid as item_id, sum((l ->> 'qty')::integer)::integer as qty,
+           max((l ->> 'price')::numeric) as custom_price
       from jsonb_array_elements(p_lines) l
      group by 1 order by 1
   loop
@@ -287,11 +293,15 @@ begin
     if v_item.qty < v_line.qty then
       raise exception 'Only % left of "%".', v_item.qty, v_item.name using errcode = 'P0001';
     end if;
+    if v_line.custom_price is not null and (v_line.custom_price < 0 or v_line.custom_price > 9999999999) then
+      raise exception 'The price for "%" is not valid.', v_item.name using errcode = 'P0001';
+    end if;
+    v_price := round(coalesce(v_line.custom_price, v_item.price), 2);
     update public.items set qty = qty - v_line.qty where id = v_item.id;
-    insert into public.sale_lines (sale_id, item_id, name, barcode, qty, price, cost)
-    values (v_sale_id, v_item.id, v_item.name, v_item.barcode, v_line.qty, v_item.price,
+    insert into public.sale_lines (sale_id, item_id, name, barcode, qty, price, list_price, cost)
+    values (v_sale_id, v_item.id, v_item.name, v_item.barcode, v_line.qty, v_price, v_item.price,
             (select c.cost from public.item_costs c where c.item_id = v_item.id));
-    v_total := v_total + v_item.price * v_line.qty;
+    v_total := v_total + v_price * v_line.qty;
   end loop;
 
   update public.sales set total = v_total where id = v_sale_id;

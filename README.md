@@ -36,7 +36,7 @@ Codabar, QR and Data Matrix.
 | --- | --- |
 | Anyone with the link | Look up one product by scanning or typing its exact barcode, and see its details |
 | With a view-only passcode | Also view and search the whole list of items (read-only) |
-| With a cashier passcode | Also sell: add items to a cart and confirm the sale, which takes them out of stock |
+| With a cashier passcode | Also sell: add items to a cart, optionally set a custom price for that sale, and confirm it, which takes the items out of stock |
 | **Admin** (signed in) | Add, change and delete items, change stock, generate barcodes, import and export CSV, original prices and profit, passcodes |
 | **Super admin** (signed in) | Everything an admin can, plus user accounts |
 

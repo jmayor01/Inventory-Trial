@@ -28,6 +28,7 @@ let role = null; // 'admin' | 'super_admin' when mode is 'staff'
 let passcode = ''; // the passcode in use when mode is 'viewer'
 let cashier = false; // true when that passcode is a cashier's
 let cart = new Map(); // item id -> quantity, for the sale being rung up
+let cartPrices = new Map(); // item id -> custom price for this sale, where the cashier set one
 // The public barcode lookup: state is 'idle' | 'loading' | 'found' | 'missing' | 'error'.
 let lookup = { state: 'idle', code: '', item: null, message: '' };
 
@@ -590,26 +591,34 @@ $('noResultsAdd').addEventListener('click', () => {
 
 // ---------- Cashier: cart and sale ----------
 // A cashier passcode can take items out of stock, but only by recording a sale.
-// The database works out the prices and refuses to sell more than is in stock;
+// The database prices each line (a custom price is the one thing the cashier may
+// set, and it is recorded as such) and refuses to sell more than is in stock;
 // the cart here is just what the cashier has rung up so far.
 
 function saveCart() {
-  try { sessionStorage.setItem(CART_KEY, JSON.stringify([...cart])); } catch { /* cart then lasts until reload */ }
+  try {
+    sessionStorage.setItem(CART_KEY, JSON.stringify([...cart].map(([id, qty]) => [id, qty, cartPrices.has(id) ? cartPrices.get(id) : null])));
+  } catch { /* cart then lasts until reload */ }
   updateCartButton();
 }
 
 function loadCart() {
+  cart = new Map();
+  cartPrices = new Map();
   try {
     const saved = JSON.parse(sessionStorage.getItem(CART_KEY));
-    cart = new Map(Array.isArray(saved) ? saved.filter(([id, qty]) => typeof id === 'string' && Number.isInteger(qty) && qty > 0) : []);
-  } catch {
-    cart = new Map();
-  }
+    for (const [id, qty, price] of Array.isArray(saved) ? saved : []) {
+      if (typeof id !== 'string' || !Number.isInteger(qty) || qty <= 0) continue;
+      cart.set(id, qty);
+      if (typeof price === 'number' && price >= 0) cartPrices.set(id, price);
+    }
+  } catch { /* start with an empty cart */ }
   updateCartButton();
 }
 
 function clearCart() {
   cart = new Map();
+  cartPrices = new Map();
   try { sessionStorage.removeItem(CART_KEY); } catch { /* ignore */ }
   updateCartButton();
 }
@@ -619,7 +628,11 @@ function cartLines() {
   const lines = [];
   for (const [id, qty] of cart) {
     const item = items.find((x) => x.id === id);
-    if (item) lines.push({ item, qty, total: item.price * qty });
+    if (!item) continue;
+    // A custom price equal to the usual one is not a custom price.
+    const custom = cartPrices.has(id) && cartPrices.get(id) !== item.price;
+    const price = custom ? cartPrices.get(id) : item.price;
+    lines.push({ item, qty, price, custom, total: price * qty });
   }
   return lines;
 }
@@ -642,17 +655,26 @@ function addToCart(it) {
 }
 
 function setCartQty(id, qty) {
-  if (qty <= 0) cart.delete(id); else cart.set(id, qty);
+  if (qty <= 0) { cart.delete(id); cartPrices.delete(id); } else cart.set(id, qty);
   saveCart();
   render();
   renderCart();
 }
 
+/** Sets (or, with null, clears) the price this sale charges for one item. */
+function setCartPrice(id, price) {
+  if (price == null) cartPrices.delete(id); else cartPrices.set(id, price);
+  saveCart();
+  renderCart();
+}
+
 function cartLineRow(line, editable) {
-  const { item, qty, total } = line;
+  const { item, qty, price, custom, total } = line;
   const li = el('li', 'cart-line');
   const info = el('div');
-  info.append(el('div', 'line-name', item.name), el('div', 'line-sub', `${qty} × ${money.format(item.price)}`));
+  const sub = el('div', 'line-sub', `${qty} × ${money.format(price)}`);
+  if (custom) sub.append(' ', el('span', 'usual', `usual ${money.format(item.price)}`));
+  info.append(el('div', 'line-name', item.name), sub);
   li.append(info, el('div', 'line-total', money.format(total)));
   if (!editable) return li;
 
@@ -676,6 +698,34 @@ function cartLineRow(line, editable) {
   remove.addEventListener('click', () => setCartQty(item.id, 0));
   controls.append(stepper, remove);
   li.append(controls);
+
+  // Selling this one at a different price, for this sale only.
+  const priceRow = el('div', 'line-price');
+  const label = el('label', '', 'Price each');
+  const input = el('input');
+  input.type = 'number';
+  input.inputMode = 'decimal';
+  input.min = '0';
+  input.step = '0.01';
+  input.value = String(price);
+  input.id = `cartPrice-${item.id}`;
+  input.setAttribute('aria-label', `Price for each ${item.name}`);
+  label.htmlFor = input.id;
+  input.addEventListener('change', () => {
+    const text = input.value.trim();
+    const value = Math.round(Number(text) * 100) / 100;
+    if (text === '' || !Number.isFinite(value) || value < 0) { setCartPrice(item.id, null); return; }
+    setCartPrice(item.id, value === item.price ? null : value);
+  });
+  priceRow.append(label, input);
+  if (custom) {
+    const reset = el('button', 'remove usual-btn', `Use ${money.format(item.price)}`);
+    reset.type = 'button';
+    reset.setAttribute('aria-label', `Use the usual price for ${item.name}`);
+    reset.addEventListener('click', () => setCartPrice(item.id, null));
+    priceRow.append(reset);
+  }
+  li.append(priceRow);
   if (qty > item.qty) li.append(el('div', 'line-warn', item.qty > 0 ? `Only ${item.qty} left in stock` : 'Now out of stock'));
   return li;
 }
@@ -715,7 +765,8 @@ $('cartConfirm').addEventListener('click', async () => {
   $('cartConfirm').textContent = 'Recording…';
   const { data, error } = await sb.rpc('record_sale', {
     p_code: passcode,
-    p_lines: lines.map((l) => ({ item_id: l.item.id, qty: l.qty })),
+    // The price is only sent where the cashier set a custom one.
+    p_lines: lines.map((l) => (l.custom ? { item_id: l.item.id, qty: l.qty, price: l.price } : { item_id: l.item.id, qty: l.qty })),
   });
   $('cartConfirm').textContent = 'Confirm sale';
   $('cartConfirm').disabled = false;
