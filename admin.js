@@ -1,8 +1,8 @@
 'use strict';
 
 // The back office. Needs a sign-in, and what it shows depends on the role:
-//   admin       - manage products (add, change, delete), export
-//   super admin - the same, plus original prices and profit, users, passcodes
+//   admin       - products, original prices and profit, passcodes, export
+//   super admin - the same, plus user accounts
 // The database enforces these rules (supabase/setup.sql); hiding things here
 // is only so that people are not shown buttons that would be refused.
 //
@@ -54,7 +54,7 @@ async function refresh() {
   const forUser = userId;
   const [itemRows, costRows] = await Promise.all([
     fetchAll('items', ITEM_COLUMNS, 'id'),
-    isSuper() ? fetchAll('item_costs', 'item_id,cost', 'item_id') : [],
+    fetchAll('item_costs', 'item_id,cost', 'item_id'),
   ]);
   if (forUser !== userId) return; // signed out meanwhile
   const costs = new Map(costRows.map((r) => [r.item_id, Number(r.cost)]));
@@ -100,7 +100,7 @@ function productRow(it) {
   const text = el('div', 'item-text');
   text.append(el('div', 'item-name', it.name));
   const sub = el('div', 'item-sub');
-  if (isSuper() && !hasCost(it)) sub.append(el('span', 'badge low', 'No original price'));
+  if (!hasCost(it)) sub.append(el('span', 'badge low', 'No original price'));
   else if (isLoss(it)) sub.append(el('span', 'badge out', 'Selling at a loss'));
   if (it.qty <= 0) sub.append(el('span', 'badge out', 'Out of stock'));
   if (sub.childNodes.length) text.append(sub);
@@ -111,19 +111,14 @@ function productRow(it) {
   const m = margin(it);
   const sp = stockProfit(it);
   const figures = el('dl', 'figures');
-  if (isSuper()) {
-    figures.append(
-      figure('Original', hasCost(it) ? money.format(it.cost) : '—'),
-      figure('Market', money.format(it.price)),
-      figure('Profit / unit', up == null ? '—' : signed(up), up != null && up < 0 ? 'neg' : ''),
-      figure('Margin', m == null ? '—' : percent(m), m != null && m < 0 ? 'neg' : ''),
-      figure('Stock', String(it.qty)),
-      figure('Expected profit', sp == null ? '—' : signed(sp), sp != null && sp < 0 ? 'neg' : ''),
-    );
-  } else {
-    figures.classList.add('few');
-    figures.append(figure('Price', money.format(it.price)), figure('Stock', String(it.qty)));
-  }
+  figures.append(
+    figure('Original', hasCost(it) ? money.format(it.cost) : '—'),
+    figure('Market', money.format(it.price)),
+    figure('Profit / unit', up == null ? '—' : signed(up), up != null && up < 0 ? 'neg' : ''),
+    figure('Margin', m == null ? '—' : percent(m), m != null && m < 0 ? 'neg' : ''),
+    figure('Stock', String(it.qty)),
+    figure('Expected profit', sp == null ? '—' : signed(sp), sp != null && sp < 0 ? 'neg' : ''),
+  );
 
   row.append(head, figures);
   row.addEventListener('click', () => openItem(it));
@@ -141,11 +136,6 @@ const SORTS = {
 };
 
 function render() {
-  if (!isSuper()) {
-    // An admin has no profit-based sorting or filters.
-    filter = 'all';
-    if (!['name', 'stock'].includes($('sort').value)) $('sort').value = 'name';
-  }
   const raw = $('search').value.trim();
   const q = raw.toLowerCase();
   const shown = items
@@ -281,12 +271,10 @@ $('itemForm').addEventListener('submit', async (e) => {
     let saved = { ...fromRow(data), cost: before ? before.cost : null };
 
     const problems = [];
-    if (isSuper()) {
-      try {
-        saved.cost = await saveCost(saved.id, costText);
-      } catch {
-        problems.push('original price');
-      }
+    try {
+      saved.cost = await saveCost(saved.id, costText);
+    } catch {
+      problems.push('original price');
     }
     if (formPhoto !== formPhotoOriginal) {
       try {
@@ -335,21 +323,19 @@ $('fDelete').addEventListener('click', async () => {
 
 $('exportBtn').addEventListener('click', () => {
   const num = (v) => (v == null ? '' : v.toFixed(2));
-  const header = isSuper()
-    ? ['barcode', 'name', 'description', 'original_price', 'market_price', 'profit_per_unit', 'margin_percent', 'qty', 'expected_profit']
-    : ['barcode', 'name', 'description', 'price', 'qty'];
+  const header = ['barcode', 'name', 'description', 'original_price', 'market_price', 'profit_per_unit', 'margin_percent', 'qty', 'expected_profit'];
   const lines = [header.join(',')];
   for (const it of [...items].sort(SORTS.name)) {
     const m = margin(it);
-    const cells = isSuper()
-      ? [it.barcode, it.name, it.description, num(it.cost), num(it.price), num(unitProfit(it)), m == null ? '' : (m * 100).toFixed(1), it.qty, num(stockProfit(it))]
-      : [it.barcode, it.name, it.description, num(it.price), it.qty];
-    lines.push(cells.map(csvCell).join(','));
+    lines.push([
+      it.barcode, it.name, it.description,
+      num(it.cost), num(it.price), num(unitProfit(it)), m == null ? '' : (m * 100).toFixed(1), it.qty, num(stockProfit(it)),
+    ].map(csvCell).join(','));
   }
   const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `inventory-${isSuper() ? 'profit-' : ''}${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `inventory-profit-${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.append(a);
   a.click();
   a.remove();
@@ -373,12 +359,12 @@ $('loginForm').addEventListener('submit', async (e) => {
   err.hidden = false;
 });
 
-// ---------- Sections (super admin) ----------
+// ---------- Sections ----------
 
 let currentTab = 'products';
 
 function showTab(name) {
-  currentTab = isSuper() ? name : 'products';
+  currentTab = name === 'users' && !isSuper() ? 'products' : name; // only the super admin manages users
   for (const tab of document.querySelectorAll('.tab')) tab.setAttribute('aria-selected', String(tab.dataset.tab === currentTab));
   for (const panel of document.querySelectorAll('.tabpanel')) panel.hidden = panel.id !== `tab-${currentTab}`;
   if (currentTab === 'users') loadUsers();
@@ -482,7 +468,7 @@ $('userForm').addEventListener('submit', async (e) => {
   }
 });
 
-// ---------- Passcodes (super admin) ----------
+// ---------- Passcodes ----------
 
 /** A random passcode without look-alike characters (no 0/O, 1/I/L). */
 function randomCode() {

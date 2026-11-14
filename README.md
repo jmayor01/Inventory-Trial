@@ -36,8 +36,8 @@ Codabar, QR and Data Matrix.
 | --- | --- |
 | Anyone with the link | Look up one product by scanning or typing its exact barcode, and see its details |
 | With a passcode | Also view and search the whole list of items (read-only) |
-| **Admin** (signed in) | Add, change and delete items, change stock, generate barcodes, import and export CSV |
-| **Super admin** (signed in) | Everything an admin can, plus original prices and profit, user accounts and passcodes |
+| **Admin** (signed in) | Add, change and delete items, change stock, generate barcodes, import and export CSV, original prices and profit, passcodes |
+| **Super admin** (signed in) | Everything an admin can, plus user accounts |
 
 These rules are enforced by the database (`supabase/setup.sql`), not only by
 the app, so they hold even for someone who talks to the database directly.
@@ -48,15 +48,15 @@ Open **Menu → Staff sign in**, or go to `/admin.html`.
 
 - **Products** — add, edit and delete. **No barcode? Generate one** makes up a
   valid EAN-13 starting with 2 (the range reserved for a shop's own codes).
-- **Profit** (super admin) — each product has an **original price** (what it
+- **Profit** — each product has an **original price** (what it
   cost you) and a **market price** (what it sells for). The page shows expected
   profit, margin, and the stock valued at both prices. *Expected profit* is what
   you earn if all current stock sells at its market price; sales are not recorded.
 - **Users** (super admin) — create admin or super admin accounts, change a
   role, remove an account.
-- **Passcodes** (super admin) — create and delete the codes that let people
+- **Passcodes** — create and delete the codes that let people
   without an account view the list of items.
-- **Export CSV** — with original price and profit columns for the super admin.
+- **Export CSV** — with original price and profit columns.
 
 Once signed in, the inventory app itself also unlocks adding, editing, stock
 +/− and CSV import/export.

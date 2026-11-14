@@ -48,15 +48,15 @@
 
   <main>
     <p class="hint whoami">Signed in as <strong id="whoEmail"></strong> · <span id="whoRole"></span></p>
-    <div class="tabs" role="tablist" aria-label="Back office sections" data-role="super_admin">
+    <div class="tabs" role="tablist" aria-label="Back office sections">
       <button type="button" class="tab" role="tab" data-tab="products" aria-selected="true">Products</button>
-      <button type="button" class="tab" role="tab" data-tab="users" aria-selected="false">Users</button>
+      <button type="button" class="tab" role="tab" data-tab="users" aria-selected="false" data-role="super_admin">Users</button>
       <button type="button" class="tab" role="tab" data-tab="codes" aria-selected="false">Passcodes</button>
     </div>
     <p id="status" class="status" role="status" hidden></p>
 
     <div id="tab-products" class="tabpanel">
-    <section class="stats profit-stats" aria-label="Profit summary" data-role="super_admin">
+    <section class="stats profit-stats" aria-label="Profit summary">
       <div class="stat highlight">
         <span class="stat-value" id="statProfit">–</span>
         <span class="stat-label">Expected profit</span>
@@ -65,7 +65,7 @@
       <div class="stat"><span class="stat-value" id="statValue">–</span><span class="stat-label">Stock at market price</span></div>
       <div class="stat"><span class="stat-value" id="statCost">–</span><span class="stat-label">Stock at original price</span></div>
     </section>
-    <p class="hint profit-note" data-role="super_admin">Expected profit is what you earn if all current stock sells at its market price. <span id="missingNote"></span></p>
+    <p class="hint profit-note">Expected profit is what you earn if all current stock sells at its market price. <span id="missingNote"></span></p>
 
     <div class="toolbar">
       <div class="searchbox">
@@ -77,9 +77,9 @@
         <label class="sr-only" for="sort">Sort products</label>
         <select id="sort">
           <option value="name">Sort: name</option>
-          <option value="profit" data-role="super_admin">Sort: highest expected profit</option>
-          <option value="unit" data-role="super_admin">Sort: highest profit per unit</option>
-          <option value="margin" data-role="super_admin">Sort: lowest margin</option>
+          <option value="profit">Sort: highest expected profit</option>
+          <option value="unit">Sort: highest profit per unit</option>
+          <option value="margin">Sort: lowest margin</option>
           <option value="stock">Sort: lowest stock</option>
         </select>
         <button id="exportBtn" type="button" class="btn">Export CSV</button>
@@ -87,7 +87,7 @@
       </div>
     </div>
 
-    <div class="chips" role="group" aria-label="Filter products" data-role="super_admin">
+    <div class="chips" role="group" aria-label="Filter products">
       <button type="button" class="chip" data-filter="all" aria-pressed="true">All <span id="countAll" class="chip-count"></span></button>
       <button type="button" class="chip" data-filter="nocost" aria-pressed="false">No original price <span id="countNoCost" class="chip-count"></span></button>
       <button type="button" class="chip" data-filter="loss" aria-pressed="false">Selling at a loss <span id="countLoss" class="chip-count"></span></button>
@@ -105,7 +105,7 @@
 
     <div id="tab-users" class="tabpanel" hidden>
       <h2 class="section-title">Users</h2>
-      <p class="hint">An <strong>admin</strong> can add, change and delete items, change stock, and import and export. A <strong>super admin</strong> can also see original prices and profit, and manage users and passcodes.</p>
+      <p class="hint">An <strong>admin</strong> can do everything in the back office except manage user accounts. Only a <strong>super admin</strong> can add users, change roles and remove accounts.</p>
       <ul id="userList" class="list plain"></ul>
       <form id="userForm" class="card-form" novalidate>
         <h3>Add a user</h3>
@@ -158,7 +158,7 @@
       <button type="button" id="fGenerate" class="btn link">No barcode? Generate one</button>
 
       <div class="two">
-        <div data-role="super_admin">
+        <div>
           <label for="fCost">Original price</label>
           <input id="fCost" name="cost" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" aria-describedby="fProfit">
         </div>
@@ -167,7 +167,7 @@
           <input id="fPrice" name="price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" aria-describedby="fProfit">
         </div>
       </div>
-      <p id="fProfit" class="profit-preview" aria-live="polite" data-role="super_admin"></p>
+      <p id="fProfit" class="profit-preview" aria-live="polite"></p>
 
       <div class="two">
         <div>

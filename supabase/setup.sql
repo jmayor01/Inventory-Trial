@@ -5,9 +5,9 @@
 -- Who can do what (enforced here, not just in the app):
 --   Nobody signed in  -> look up one item by its exact barcode
 --   With a passcode   -> also view the whole list of items
---   Admin             -> add, change and delete items, change stock, import
---   Super admin       -> everything an admin can, plus original prices and
---                        profit, user accounts and passcodes
+--   Admin             -> add, change and delete items, change stock, import,
+--                        original prices and profit, passcodes
+--   Super admin       -> everything an admin can, plus user accounts
 
 -- Items -----------------------------------------------------------------------
 
@@ -44,7 +44,7 @@ create table if not exists public.item_photos (
   data text not null check (data like 'data:image/%' and length(data) < 1500000)
 );
 
--- Original (cost) prices, kept apart from items so that only the super admin
+-- Original (cost) prices, kept apart from items so that only signed-in staff
 -- can read them. Profit is worked out from these.
 create table if not exists public.item_costs (
   item_id uuid primary key references public.items (id) on delete cascade,
@@ -111,8 +111,9 @@ create policy "Staff can use item photos" on public.item_photos
 
 drop policy if exists "Back office can use item costs" on public.item_costs;
 drop policy if exists "Super admin can use item costs" on public.item_costs;
-create policy "Super admin can use item costs" on public.item_costs
-  for all to authenticated using (public.is_super_admin()) with check (public.is_super_admin());
+drop policy if exists "Staff can use item costs" on public.item_costs;
+create policy "Staff can use item costs" on public.item_costs
+  for all to authenticated using (public.is_staff()) with check (public.is_staff());
 
 drop policy if exists "Read own profile or all as super admin" on public.profiles;
 create policy "Read own profile or all as super admin" on public.profiles
@@ -127,8 +128,9 @@ create policy "Super admin can change other roles" on public.profiles
   with check (public.is_super_admin() and user_id <> (select auth.uid()));
 
 drop policy if exists "Super admin can use passcodes" on public.access_codes;
-create policy "Super admin can use passcodes" on public.access_codes
-  for all to authenticated using (public.is_super_admin()) with check (public.is_super_admin());
+drop policy if exists "Staff can use passcodes" on public.access_codes;
+create policy "Staff can use passcodes" on public.access_codes
+  for all to authenticated using (public.is_staff()) with check (public.is_staff());
 
 revoke all on public.items, public.item_photos, public.item_costs, public.profiles, public.access_codes from anon;
 grant select, insert, update, delete on public.items, public.item_photos, public.item_costs, public.access_codes to authenticated;

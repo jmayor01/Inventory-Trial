@@ -425,7 +425,6 @@ select {
 .product-head .item-text { flex: 1; min-width: 0; }
 .figures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 12px; margin: 12px 0 0; }
 .figures div { min-width: 0; }
-.figures.few { grid-template-columns: repeat(2, 1fr); }
 .figures dt { color: var(--muted); font-size: .75rem; }
 .figures dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (min-width: 720px) {
