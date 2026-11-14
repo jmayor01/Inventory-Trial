@@ -140,6 +140,10 @@ body[data-sell] #scanBtn { flex: 0 0 auto; padding: 0 18px; background: var(--su
 .cart-line .line-price label { margin: 0; font-weight: 400; color: var(--muted); font-size: .85rem; white-space: nowrap; }
 .cart-line .line-price input { width: 7.5em; min-height: 44px; padding: 8px 10px; font-variant-numeric: tabular-nums; }
 .cart-line .usual-btn { color: var(--primary); margin-left: auto; }
+.sale-fields { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sale-fields label { margin: 0; font-weight: 400; color: var(--muted); font-size: .85rem; }
+.sale-fields input { margin-top: 4px; min-height: 44px; }
+#saleLines .line-name, #saleLines .line-sub { grid-column: 1 / -1; }
 .cart-total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 14px; font-size: 1.05rem; }
 .cart-total strong { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
 #cartDlg .dlg-actions { flex-wrap: wrap; }

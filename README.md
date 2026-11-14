@@ -55,7 +55,8 @@ Open **Menu → Staff sign in**, or go to `/admin.html`.
   you earn if all current stock sells at its market price; sales are not recorded.
 - **Sales** — what cashiers actually sold: profit, sales total, number of sales
   and items for today, the last 7 or 30 days, or all time, with every sale
-  listed. A sale can be cancelled, which puts its items back in stock.
+  listed. A sale can be edited (quantities and prices) or cancelled; stock
+  follows the change, and either one asks for your password first.
 - **Users** (super admin) — create admin or super admin accounts, change a
   role, remove an account.
 - **Passcodes** — create and delete the codes for people without an account:

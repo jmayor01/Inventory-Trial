@@ -247,6 +247,40 @@
     </div>
   </dialog>
 
+  <!-- Correct a recorded sale -->
+  <dialog id="saleDlg" aria-labelledby="saleTitle">
+    <form id="saleForm" novalidate>
+      <h2 id="saleTitle" tabindex="-1">Edit sale</h2>
+      <p class="hint" id="saleWhen"></p>
+      <ul id="saleLines" class="cart-lines"></ul>
+      <div class="cart-total"><span>New total</span><strong id="saleTotal"></strong></div>
+      <p class="hint">Stock follows the change: a lower quantity puts items back, a higher one takes them out. Set a quantity to 0 to remove the item from the sale.</p>
+      <p id="saleError" class="error" role="alert" hidden></p>
+      <div class="dlg-actions">
+        <span class="spacer"></span>
+        <button type="button" id="saleCancel" class="btn">Cancel</button>
+        <button type="submit" id="saleSave" class="btn primary">Save changes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Password check before changing or cancelling a sale -->
+  <dialog id="passwordDlg" aria-labelledby="passwordTitle" aria-describedby="passwordText">
+    <form id="passwordForm" novalidate>
+      <h2 id="passwordTitle"></h2>
+      <p id="passwordText" class="hint"></p>
+      <label for="passwordInput">Your password</label>
+      <input id="passwordInput" type="password" autocomplete="current-password" required>
+      <p class="hint">Signed in as <strong id="passwordEmail"></strong></p>
+      <p id="passwordError" class="error" role="alert" hidden></p>
+      <div class="dlg-actions">
+        <span class="spacer"></span>
+        <button type="button" id="passwordCancel" class="btn">Back</button>
+        <button type="submit" id="passwordOk" class="btn primary"></button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Yes / no question -->
   <dialog id="confirmDlg" aria-labelledby="confirmTitle" aria-describedby="confirmText">
     <h2 id="confirmTitle"></h2>

@@ -17,6 +17,7 @@ let items = [];
 let loaded = false;
 let userId = null;
 let role = null; // 'admin' | 'super_admin'
+let userEmail = '';
 const isSuper = () => role === 'super_admin';
 let filter = 'all'; // 'all' | 'nocost' | 'loss'
 let editingId = null;
@@ -378,6 +379,57 @@ function showError(id, message) {
   $(id).hidden = !message;
 }
 
+// ---------- Password check ----------
+
+/**
+ * Asks the signed-in user for their password before a sensitive change and
+ * resolves to true once it has been checked with Supabase. Stops someone who
+ * picks up an unlocked, signed-in device from altering the sales records.
+ */
+function confirmWithPassword({ title, text, ok, danger }) {
+  return new Promise((resolve) => {
+    const dlg = $('passwordDlg');
+    $('passwordTitle').textContent = title;
+    $('passwordText').textContent = text;
+    $('passwordEmail').textContent = userEmail;
+    $('passwordOk').textContent = ok;
+    $('passwordOk').className = danger ? 'btn danger solid' : 'btn primary';
+    $('passwordInput').value = '';
+    showError('passwordError', '');
+    let passed = false;
+
+    const onSubmit = async (e) => {
+      e.preventDefault();
+      const password = $('passwordInput').value;
+      if (!password) { showError('passwordError', 'Enter your password.'); $('passwordInput').focus(); return; }
+      $('passwordOk').disabled = true;
+      // Signing in again as the same account is how the password gets checked.
+      const { error } = await sb.auth.signInWithPassword({ email: userEmail, password });
+      $('passwordOk').disabled = false;
+      if (error) {
+        showError('passwordError', error.code === 'invalid_credentials' ? 'That password is not right.' : explain(error, 'Could not check the password. Please try again.'));
+        $('passwordInput').select();
+        return;
+      }
+      passed = true;
+      dlg.close();
+    };
+    const onCancel = () => dlg.close();
+    const onClose = () => {
+      $('passwordForm').removeEventListener('submit', onSubmit);
+      $('passwordCancel').removeEventListener('click', onCancel);
+      dlg.removeEventListener('close', onClose);
+      $('passwordInput').value = '';
+      resolve(passed);
+    };
+    $('passwordForm').addEventListener('submit', onSubmit);
+    $('passwordCancel').addEventListener('click', onCancel);
+    dlg.addEventListener('close', onClose);
+    dlg.showModal();
+    $('passwordInput').focus();
+  });
+}
+
 // ---------- Sales ----------
 // What cashiers actually sold, and the profit on it. Each sale line carries the
 // market and original price as they were at the time of the sale.
@@ -396,7 +448,7 @@ async function loadSales() {
   for (const chip of document.querySelectorAll('.chip[data-period]')) chip.setAttribute('aria-pressed', String(chip.dataset.period === salesPeriod));
   const forPeriod = salesPeriod;
   let query = sb.from('sales')
-    .select('id,created_at,sold_by,total,voided_at,voided_by,sale_lines(name,qty,price,list_price,cost)')
+    .select('id,created_at,sold_by,total,voided_at,voided_by,edited_at,edited_by,sale_lines(id,name,qty,price,list_price,cost)')
     .order('created_at', { ascending: false })
     .limit(SALES_LIMIT);
   const from = periodStart();
@@ -438,7 +490,7 @@ async function loadSales() {
       : `${l.qty} × ${l.name}`)).join(', ')));
     const detail = voided
       ? `${when} · cancelled${sale.voided_by ? ` by ${sale.voided_by}` : ''}`
-      : `${when} · profit ${signed(saleProfit)}${saleUncosted ? ' (some items had no original price)' : ''}`;
+      : `${when} · profit ${signed(saleProfit)}${saleUncosted ? ' (some items had no original price)' : ''}${sale.edited_at ? ` · edited${sale.edited_by ? ` by ${sale.edited_by}` : ''}` : ''}`;
     main.append(el('div', 'hint', detail));
     li.append(main);
     if (!voided) {
@@ -447,9 +499,9 @@ async function loadSales() {
       cancel.type = 'button';
       cancel.setAttribute('aria-label', `Cancel the sale of ${money.format(Number(sale.total))} made ${when}`);
       cancel.addEventListener('click', async () => {
-        const yes = await confirmDialog({
+        const yes = await confirmWithPassword({
           title: 'Cancel this sale?',
-          text: 'Its items go back into stock and it no longer counts towards sales and profit. This cannot be undone.',
+          text: 'Its items go back into stock and it no longer counts towards sales and profit. This cannot be undone. Enter your password to confirm.',
           ok: 'Cancel sale',
           danger: true,
         });
@@ -460,7 +512,11 @@ async function loadSales() {
         loadSales();
         refreshQuietly();
       });
-      actions.append(cancel);
+      const edit = el('button', 'btn', 'Edit');
+      edit.type = 'button';
+      edit.setAttribute('aria-label', `Edit the sale of ${money.format(Number(sale.total))} made ${when}`);
+      edit.addEventListener('click', () => openSale(sale, when));
+      actions.append(edit, cancel);
       li.append(actions);
     }
     list.append(li);
@@ -477,6 +533,87 @@ async function loadSales() {
   $('salesNote').textContent = notes.join(' ');
   $('salesEmpty').hidden = data.length > 0;
 }
+
+// ---- Correcting a sale ----
+
+let editingSale = null;
+
+function saleEdits() {
+  return [...$('saleLines').querySelectorAll('.cart-line')].map((row) => ({
+    line_id: row.dataset.lineId,
+    qty: Math.round(Number(row.querySelector('.sale-qty').value)),
+    price: Math.round(Number(row.querySelector('.sale-price').value) * 100) / 100,
+  }));
+}
+
+function updateSaleTotal() {
+  const total = saleEdits().reduce((sum, l) => sum + (Number.isFinite(l.qty * l.price) ? l.qty * l.price : 0), 0);
+  $('saleTotal').textContent = money.format(total);
+}
+
+function openSale(sale, when) {
+  editingSale = sale;
+  $('saleWhen').textContent = `${when} · ${sale.sold_by || 'Cashier'}`;
+  showError('saleError', '');
+  const rows = (sale.sale_lines || []).map((l) => {
+    const li = el('li', 'cart-line');
+    li.dataset.lineId = l.id;
+    const usual = l.list_price != null && Number(l.list_price) !== Number(l.price) ? ` · usual ${money.format(Number(l.list_price))}` : '';
+    li.append(el('div', 'line-name', l.name), el('div', 'line-sub', `was ${l.qty} × ${money.format(Number(l.price))}${usual}`));
+    const fields = el('div', 'sale-fields');
+    const field = (labelText, className, value, step) => {
+      const wrap = el('label', '', labelText);
+      const input = el('input', className);
+      input.type = 'number';
+      input.inputMode = step === '1' ? 'numeric' : 'decimal';
+      input.min = '0';
+      input.step = step;
+      input.value = String(value);
+      input.addEventListener('input', updateSaleTotal);
+      wrap.append(input);
+      return wrap;
+    };
+    fields.append(field('Quantity', 'sale-qty', l.qty, '1'), field('Price each', 'sale-price', Number(l.price), '0.01'));
+    li.append(fields);
+    return li;
+  });
+  $('saleLines').replaceChildren(...rows);
+  updateSaleTotal();
+  $('saleDlg').showModal();
+  $('saleTitle').focus();
+}
+
+$('saleCancel').addEventListener('click', () => $('saleDlg').close());
+
+$('saleForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!editingSale) return;
+  const edits = saleEdits();
+  showError('saleError', '');
+  if (edits.some((l) => !Number.isInteger(l.qty) || l.qty < 0)) { showError('saleError', 'Every quantity must be a whole number, 0 or more.'); return; }
+  if (edits.some((l) => !Number.isFinite(l.price) || l.price < 0)) { showError('saleError', 'Every price must be 0 or more.'); return; }
+  if (edits.every((l) => l.qty === 0)) { showError('saleError', 'A sale needs at least one item. Use Cancel sale to undo the whole sale.'); return; }
+  // Only send the lines that actually changed.
+  const before = new Map((editingSale.sale_lines || []).map((l) => [l.id, l]));
+  const changed = edits.filter((l) => { const b = before.get(l.line_id); return !b || b.qty !== l.qty || Number(b.price) !== l.price; });
+  if (!changed.length) { $('saleDlg').close(); return; }
+  const sure = await confirmWithPassword({
+    title: 'Save changes to this sale?',
+    text: 'The sale and the stock will be updated. Enter your password to confirm.',
+    ok: 'Save changes',
+  });
+  if (!sure) return;
+  $('saleSave').disabled = true;
+  $('saleSave').textContent = 'Saving…';
+  const { error } = await sb.rpc('edit_sale', { p_sale_id: editingSale.id, p_lines: changed });
+  $('saleSave').disabled = false;
+  $('saleSave').textContent = 'Save changes';
+  if (error) { showError('saleError', error.code === 'P0001' ? error.message : explain(error, 'Could not save the changes.')); return; }
+  $('saleDlg').close();
+  toast('Sale updated and stock adjusted');
+  loadSales();
+  refreshQuietly();
+});
 
 for (const chip of document.querySelectorAll('.chip[data-period]')) {
   chip.addEventListener('click', () => { salesPeriod = chip.dataset.period; loadSales(); });
@@ -703,7 +840,8 @@ async function applySession(session) {
   role = data.role;
   document.body.dataset.role = role;
   document.body.dataset.view = 'app';
-  $('whoEmail').textContent = user.email || '';
+  userEmail = user.email || '';
+  $('whoEmail').textContent = userEmail;
   $('whoRole').textContent = ROLE_NAMES[role];
   $('cCode').value = randomCode();
   showTab('products');

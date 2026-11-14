@@ -109,6 +109,8 @@ create table if not exists public.sales (
   voided_by text
 );
 create index if not exists sales_created_at on public.sales (created_at desc);
+alter table public.sales add column if not exists edited_at timestamptz;
+alter table public.sales add column if not exists edited_by text;
 
 create table if not exists public.sale_lines (
   id uuid primary key default gen_random_uuid(),
@@ -333,6 +335,87 @@ begin
          voided_by = coalesce((select email from public.profiles where user_id = (select auth.uid())), '')
    where id = p_sale_id;
 end $$;
+
+-- Corrects a sale after the fact. Staff only. p_lines is a JSON array of
+-- {"line_id": "...", "qty": 2, "price": 100}; a line left out stays as it is,
+-- and qty 0 removes it. Stock follows the change: selling fewer puts items
+-- back, selling more takes them out (and is refused if there are not enough).
+create or replace function public.edit_sale(p_sale_id uuid, p_lines jsonb)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  v_sale public.sales%rowtype;
+  v_line public.sale_lines%rowtype;
+  v_edit record;
+  v_stock integer;
+  v_delta integer;
+  v_total numeric(14, 2);
+begin
+  if not public.is_staff() then
+    raise exception 'permission denied' using errcode = '42501';
+  end if;
+  select * into v_sale from public.sales where id = p_sale_id for update;
+  if not found then
+    raise exception 'That sale no longer exists.' using errcode = 'P0001';
+  end if;
+  if v_sale.voided_at is not null then
+    raise exception 'A cancelled sale cannot be edited.' using errcode = 'P0001';
+  end if;
+  if p_lines is null or jsonb_typeof(p_lines) <> 'array' then
+    raise exception 'Nothing to change.' using errcode = 'P0001';
+  end if;
+
+  for v_edit in
+    select (l ->> 'line_id')::uuid as line_id, (l ->> 'qty')::integer as qty, (l ->> 'price')::numeric as price
+      from jsonb_array_elements(p_lines) l
+     order by 1
+  loop
+    select * into v_line from public.sale_lines where id = v_edit.line_id and sale_id = p_sale_id for update;
+    if not found then
+      raise exception 'A line of this sale no longer exists. Reload and try again.' using errcode = 'P0001';
+    end if;
+    if v_edit.qty is null or v_edit.qty < 0 then
+      raise exception 'Every quantity must be 0 or more.' using errcode = 'P0001';
+    end if;
+    if v_edit.price is null or v_edit.price < 0 or v_edit.price > 9999999999 then
+      raise exception 'The price for "%" is not valid.', v_line.name using errcode = 'P0001';
+    end if;
+
+    v_delta := v_edit.qty - v_line.qty; -- more sold (positive) or fewer (negative)
+    if v_delta <> 0 then
+      if v_line.item_id is null then
+        if v_delta > 0 then
+          raise exception '"%" has been deleted, so more of it cannot be added to the sale.', v_line.name using errcode = 'P0001';
+        end if;
+      else
+        select qty into v_stock from public.items where id = v_line.item_id for update;
+        if v_delta > v_stock then
+          raise exception 'Only % more of "%" in stock.', v_stock, v_line.name using errcode = 'P0001';
+        end if;
+        update public.items set qty = qty - v_delta where id = v_line.item_id;
+      end if;
+    end if;
+
+    if v_edit.qty = 0 then
+      delete from public.sale_lines where id = v_line.id;
+    else
+      update public.sale_lines set qty = v_edit.qty, price = round(v_edit.price, 2) where id = v_line.id;
+    end if;
+  end loop;
+
+  select sum(price * qty) into v_total from public.sale_lines where sale_id = p_sale_id;
+  if v_total is null then
+    raise exception 'A sale needs at least one item. Cancel the sale instead.' using errcode = 'P0001';
+  end if;
+  update public.sales
+     set total = v_total,
+         edited_at = now(),
+         edited_by = coalesce((select email from public.profiles where user_id = (select auth.uid())), '')
+   where id = p_sale_id;
+  return jsonb_build_object('sale_id', p_sale_id, 'total', v_total);
+end $$;
+
+revoke all on function public.edit_sale(uuid, jsonb) from public, anon;
+grant execute on function public.edit_sale(uuid, jsonb) to authenticated;
 
 revoke all on function public.access_code_kind(text), public.record_sale(text, jsonb) from public;
 grant execute on function public.access_code_kind(text), public.record_sale(text, jsonb) to anon, authenticated;
