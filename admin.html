@@ -181,7 +181,10 @@
         <input id="fBarcode" name="barcode" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Scan or type">
         <button type="button" id="fScan" class="btn square" aria-label="Scan the barcode with the camera"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M8 8v8M11 8v8M14 8v8M17 8v8"/></svg></button>
       </div>
-      <button type="button" id="fGenerate" class="btn link">No barcode? Generate one</button>
+      <div class="link-row">
+        <button type="button" id="fGenerate" class="btn link">No barcode? Generate one</button>
+        <button type="button" id="fLabel" class="btn link">Print label</button>
+      </div>
 
       <div class="two">
         <div>
@@ -266,6 +269,29 @@
     </form>
   </dialog>
 
+  <!-- Barcode label, as an image for a label printer's app -->
+  <dialog id="labelDlg" aria-labelledby="labelTitle">
+    <h2 id="labelTitle" tabindex="-1">Print label</h2>
+    <p class="hint">This makes a label image sized for a NIIMBOT B1. Share it to the NIIMBOT app (or save it and open it there) and print from the app.</p>
+    <div class="label-preview"><canvas id="labelCanvas" role="img" aria-label="Label preview"></canvas></div>
+    <label for="labelSize">Label size</label>
+    <select id="labelSize">
+      <option value="50x30">50 × 30 mm</option>
+      <option value="40x30">40 × 30 mm</option>
+      <option value="40x20">40 × 20 mm</option>
+      <option value="30x20">30 × 20 mm</option>
+    </select>
+    <label class="check" for="labelName"><input id="labelName" type="checkbox" checked> Show the product name</label>
+    <label class="check" for="labelPrice"><input id="labelPrice" type="checkbox" checked> Show the price</label>
+    <p id="labelError" class="error" role="alert" hidden></p>
+    <div class="dlg-actions">
+      <button type="button" id="labelClose" class="btn">Close</button>
+      <span class="spacer"></span>
+      <button type="button" id="labelDownload" class="btn">Save image</button>
+      <button type="button" id="labelShare" class="btn primary" hidden>Share</button>
+    </div>
+  </dialog>
+
   <!-- Super admin: set a new password for an account -->
   <dialog id="resetDlg" aria-labelledby="resetTitle">
     <form id="resetForm" novalidate>
@@ -317,6 +343,7 @@
 
   <script src="vendor/barcode-detector.js"></script>
   <script src="vendor/supabase.js"></script>
+  <script src="vendor/JsBarcode.all.min.js"></script>
   <script src="config.js"></script>
   <script src="common.js"></script>
   <script src="admin.js"></script>

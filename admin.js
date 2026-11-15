@@ -322,6 +322,151 @@ $('fDelete').addEventListener('click', async () => {
   }
 });
 
+// ---------- Barcode labels ----------
+// Draws a label (name, barcode, price) as an image at the printer's own
+// resolution, to be printed from the label printer's app. Sized for the
+// NIIMBOT B1: 203 dots per inch, i.e. 8 dots per millimetre.
+
+const LABEL_DOTS_PER_MM = 8;
+const LABEL_SIZE_KEY = 'inventory.labelSize';
+
+/** EAN-13 when the code is a valid one, otherwise Code 128, which takes any text. */
+function barcodeFormat(code) {
+  if (/^\d{13}$/.test(code)) {
+    let sum = 0;
+    for (let i = 0; i < 12; i++) sum += Number(code[i]) * (i % 2 ? 3 : 1);
+    if ((10 - (sum % 10)) % 10 === Number(code[12])) return 'EAN13';
+  }
+  return 'CODE128';
+}
+
+/** Shortens text with an ellipsis until it fits the width. */
+function fitText(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let out = text;
+  while (out.length > 1 && ctx.measureText(`${out}…`).width > maxWidth) out = out.slice(0, -1);
+  return `${out.trimEnd()}…`;
+}
+
+/** Draws the label; returns an error message, or '' when it worked. */
+function drawLabel() {
+  const canvas = $('labelCanvas');
+  const [wMm, hMm] = $('labelSize').value.split('x').map(Number);
+  const W = wMm * LABEL_DOTS_PER_MM;
+  const H = hMm * LABEL_DOTS_PER_MM;
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#000';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+
+  const code = $('fBarcode').value.trim();
+  const name = $('fName').value.trim();
+  const showName = $('labelName').checked && name;
+  const showPrice = $('labelPrice').checked;
+  const pad = Math.round(1.5 * LABEL_DOTS_PER_MM);
+  const small = H <= 20 * LABEL_DOTS_PER_MM; // short labels get smaller text
+  const nameSize = small ? 20 : 26;
+  const priceSize = small ? 26 : 36;
+  let top = pad;
+  let bottom = H - pad;
+
+  if (showName) {
+    ctx.font = `bold ${nameSize}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(fitText(ctx, name, W - 2 * pad), W / 2, top);
+    top += nameSize + 4;
+  }
+  if (showPrice) {
+    ctx.font = `bold ${priceSize}px Arial, Helvetica, sans-serif`;
+    bottom -= priceSize;
+    ctx.fillText(fitText(ctx, money.format(toNumber($('fPrice').value)), W - 2 * pad), W / 2, bottom);
+    bottom -= 4;
+  }
+
+  // The barcode takes the space that is left. Bars are whole printer dots wide
+  // (never scaled), which is what keeps them scannable once printed.
+  const digits = small ? 18 : 22;
+  const space = bottom - top;
+  const format = barcodeFormat(code);
+  const scratch = document.createElement('canvas');
+  for (let dot = 4; dot >= 1; dot--) {
+    try {
+      JsBarcode(scratch, code, {
+        format, width: dot, height: Math.max(24, space - digits - 6), margin: 0,
+        displayValue: true, fontSize: digits, textMargin: 2, font: 'Arial, Helvetica, sans-serif', fontOptions: 'bold',
+        background: '#ffffff', lineColor: '#000000',
+      });
+    } catch {
+      return 'This barcode cannot be drawn. Use letters and numbers only.';
+    }
+    // Leave a clear margin either side; scanners need it.
+    if (scratch.width <= W - 2 * pad - 4 * dot) {
+      ctx.drawImage(scratch, Math.round((W - scratch.width) / 2), top + Math.max(0, Math.round((space - scratch.height) / 2)));
+      return '';
+    }
+  }
+  return 'This barcode is too long for the label. Choose a bigger label size.';
+}
+
+function refreshLabel() {
+  const message = drawLabel();
+  showError('labelError', message);
+  $('labelDownload').disabled = Boolean(message);
+  $('labelShare').disabled = Boolean(message);
+  try { localStorage.setItem(LABEL_SIZE_KEY, $('labelSize').value); } catch { /* not remembered */ }
+}
+
+function labelFile() {
+  return new Promise((resolve) => {
+    $('labelCanvas').toBlob((blob) => {
+      const safe = ($('fName').value.trim() || 'label').replace(/[^\w-]+/g, '-').slice(0, 40);
+      resolve(new File([blob], `label-${safe}.png`, { type: 'image/png' }));
+    }, 'image/png');
+  });
+}
+
+$('fLabel').addEventListener('click', () => {
+  if (!$('fBarcode').value.trim()) {
+    showFormError('Enter, scan or generate a barcode first.', $('fBarcode'));
+    return;
+  }
+  try {
+    const saved = localStorage.getItem(LABEL_SIZE_KEY);
+    if (saved && [...$('labelSize').options].some((o) => o.value === saved)) $('labelSize').value = saved;
+  } catch { /* use the default size */ }
+  // Sharing an image file straight to another app only exists on phones.
+  const probe = new File([''], 'label.png', { type: 'image/png' });
+  $('labelShare').hidden = !(navigator.canShare && navigator.canShare({ files: [probe] }));
+  refreshLabel();
+  $('labelDlg').showModal();
+  $('labelTitle').focus();
+});
+for (const id of ['labelSize', 'labelName', 'labelPrice']) $(id).addEventListener('change', refreshLabel);
+$('labelClose').addEventListener('click', () => $('labelDlg').close());
+
+$('labelDownload').addEventListener('click', async () => {
+  const file = await labelFile();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = file.name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('Label image saved');
+});
+
+$('labelShare').addEventListener('click', async () => {
+  try {
+    await navigator.share({ files: [await labelFile()], title: 'Barcode label' });
+  } catch (e) {
+    if (e && e.name !== 'AbortError') toast('Could not share. Use Save image instead.');
+  }
+});
+
 // ---------- Export ----------
 
 $('exportBtn').addEventListener('click', () => {

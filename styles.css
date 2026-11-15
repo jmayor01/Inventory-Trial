@@ -474,6 +474,13 @@ select {
   .product { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 2fr); align-items: center; gap: 16px; }
   .figures { grid-template-columns: repeat(6, 1fr); margin: 0; }
 }
+.link-row { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.label-preview {
+  margin-top: 12px; padding: 14px; border-radius: 12px;
+  background: var(--surface-2); display: grid; place-items: center;
+}
+.label-preview canvas { max-width: 100%; height: auto; background: #fff; border: 1px solid var(--border); border-radius: 4px; image-rendering: pixelated; }
+#labelDlg select { width: 100%; }
 .profit-preview { font-size: .9rem; color: var(--muted); margin-top: 8px; min-height: 1.4em; }
 .profit-preview strong { color: var(--text); }
 .profit-preview .neg { color: var(--danger); }

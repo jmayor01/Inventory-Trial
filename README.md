@@ -72,6 +72,9 @@ Open **Menu → Staff sign in**, or go to `/admin.html`.
 
 - **Products** — add, edit and delete. **No barcode? Generate one** makes up a
   valid EAN-13 starting with 2 (the range reserved for a shop's own codes).
+- **Print label** — in the product form, makes a label image (name, barcode,
+  price) sized for a NIIMBOT B1 (50×30, 40×30, 40×20 or 30×20 mm). Share or
+  save it and print it from the NIIMBOT app.
 - **Profit** — each product has an **original price** (what it
   cost you) and a **market price** (what it sells for). The page shows expected
   profit, margin, and the stock valued at both prices. *Expected profit* is what
