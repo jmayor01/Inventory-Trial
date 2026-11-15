@@ -787,7 +787,7 @@ $('codeForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const code = $('cCode').value.trim().toUpperCase();
   showError('codeError', '');
-  if (!/^[A-Z0-9]{6,64}$/.test(code)) { showError('codeError', 'Use 6 or more letters and numbers, with no spaces.'); $('cCode').focus(); return; }
+  if (!/^[A-Z0-9]{8,64}$/.test(code)) { showError('codeError', 'Use 8 or more letters and numbers, with no spaces. A longer passcode is harder to guess.'); $('cCode').focus(); return; }
   $('codeSave').disabled = true;
   const { error } = await sb.from('access_codes').insert({ code, label: $('cLabel').value.trim(), kind: $('cKind').value });
   $('codeSave').disabled = false;

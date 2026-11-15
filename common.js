@@ -28,6 +28,7 @@ function explain(error, fallback) {
   if (code === '23505') return 'That barcode is already used by another item.';
   if (code === '42P01' || code === 'PGRST205' || code === 'PGRST202') return 'The database is not set up yet. Run supabase/setup.sql in the Supabase SQL Editor.';
   if (code === '28000') return 'That passcode is not valid.';
+  if (code === 'P0001' && message) return message; // written for the person using the app
   if (code === '42501' || code === 'PGRST301') return 'You do not have permission to do that. Try signing in again.';
   return fallback;
 }

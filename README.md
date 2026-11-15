@@ -43,6 +43,27 @@ Codabar, QR and Data Matrix.
 These rules are enforced by the database (`supabase/setup.sql`), not only by
 the app, so they hold even for someone who talks to the database directly.
 
+## Security
+
+- **Access rules live in the database.** Every table has row level security,
+  and nothing can be read or changed without signing in except through a few
+  narrow functions (barcode lookup, passcode list, recording a sale).
+- **Passcode guessing is limited.** After 20 wrong passcodes from one address
+  in 15 minutes, that address is refused for the rest of the 15 minutes.
+  New passcodes must be at least 8 characters.
+- **Sales records need a fresh password.** Editing or cancelling a sale is
+  refused by the database unless the account's password was entered in the
+  last 10 minutes, so an unattended signed-in device is not enough.
+- **Browser protections.** `vercel.json` sends a Content Security Policy that
+  only allows the app's own scripts and its one Supabase project, plus headers
+  against framing and content sniffing.
+- **Keys.** Only the publishable key is in the code. The secret key is used
+  solely by the `manage-users` function on Supabase's servers.
+
+Things to keep an eye on yourself: keep **Allow new users to sign up** off,
+use strong passwords for staff accounts, give each cashier their own passcode,
+and delete a passcode or account as soon as someone leaves.
+
 ## Back office
 
 Open **Menu → Staff sign in**, or go to `/admin.html`.

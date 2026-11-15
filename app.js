@@ -84,7 +84,8 @@ async function refresh() {
   } else if (mode === 'viewer') {
     const { data, error } = await sb.rpc('list_items_with_code', { p_code: passcode });
     if (error) throw error;
-    rows = data || [];
+    if (data === null) throw { code: '28000' }; // the passcode is no longer valid
+    rows = data;
   } else {
     return;
   }
@@ -771,10 +772,11 @@ $('cartConfirm').addEventListener('click', async () => {
   $('cartConfirm').textContent = 'Confirm sale';
   $('cartConfirm').disabled = false;
 
-  if (error) {
+  if (error || data === null) {
+    // No reply means the passcode is not a cashier's any more.
     // P0001 carries a message written for the cashier, e.g. 'Only 2 left of "Soap".'
-    showCartError(error.code === 'P0001' ? error.message
-      : error.code === '28000' ? 'This passcode can no longer record sales. Ask an admin for a new one.'
+    showCartError(!error || error.code === '28000' ? 'This passcode can no longer record sales. Ask an admin for a new one.'
+      : error.code === 'P0001' ? error.message
       : explain(error, 'The sale was not recorded. Please try again.'));
     await refreshQuietly(); // stock may have changed under us
     if (mode === 'viewer') renderCart();
@@ -805,9 +807,10 @@ $('unlockForm').addEventListener('submit', async (e) => {
   $('unlockBtn').disabled = true;
   const kindReply = await sb.rpc('access_code_kind', { p_code: code });
   const kind = kindReply.data;
-  const { data, error } = kindReply.error || !kind
+  let { data, error } = kindReply.error || !kind
     ? { data: null, error: kindReply.error || { code: '28000' } }
     : await sb.rpc('list_items_with_code', { p_code: code });
+  if (!error && data === null) error = { code: '28000' };
   $('unlockBtn').disabled = false;
   if (error) {
     err.textContent = error.code === '28000' ? 'That passcode is not right. Check it and try again.' : explain(error, 'Could not check the passcode. Please try again.');

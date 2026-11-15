@@ -194,6 +194,51 @@ grant select, update (role) on public.profiles to authenticated;
 -- These functions are the only way in for them. Each returns JSON so the app
 -- gets everything in one call.
 
+-- Wrong passcode guesses, so that guessing can be slowed down. Only the
+-- functions below touch this table.
+create table if not exists public.code_attempts (
+  ip text not null,
+  at timestamptz not null default now()
+);
+create index if not exists code_attempts_ip_at on public.code_attempts (ip, at);
+alter table public.code_attempts enable row level security;
+revoke all on public.code_attempts from anon, authenticated;
+
+-- The caller's address as the API gateway reports it ('unknown' when it does not).
+create or replace function public.caller_ip()
+returns text language sql stable set search_path = '' as $$
+  select coalesce(
+    nullif(h ->> 'cf-connecting-ip', ''),
+    nullif(trim(split_part(h ->> 'x-forwarded-for', ',', 1)), ''),
+    'unknown')
+  from (select coalesce(nullif(current_setting('request.headers', true), ''), '{}')::json as h) x;
+$$;
+
+-- Looks a passcode up. Returns its row, or a row of nulls when it is wrong.
+-- After 20 wrong guesses from one address in 15 minutes, that address is
+-- refused for the rest of the 15 minutes, right passcode or not. Wrong guesses
+-- are reported by returning null rather than raising, because raising would
+-- undo the record of the guess.
+create or replace function public.use_access_code(p_code text)
+returns public.access_codes language plpgsql security definer set search_path = '' as $$
+declare
+  v_ip text := public.caller_ip();
+  v_row public.access_codes%rowtype;
+begin
+  if v_ip <> 'unknown' and (
+    select count(*) from public.code_attempts where ip = v_ip and at > now() - interval '15 minutes'
+  ) >= 20 then
+    raise exception 'Too many wrong passcodes. Wait 15 minutes and try again.' using errcode = 'P0001';
+  end if;
+  select * into v_row from public.access_codes where code = upper(trim(coalesce(p_code, '')));
+  if found then
+    return v_row;
+  end if;
+  insert into public.code_attempts (ip) values (v_ip);
+  delete from public.code_attempts where at < now() - interval '1 day';
+  return null;
+end $$;
+
 -- One item by its exact barcode, with its photo. Null when there is none.
 create or replace function public.lookup_item(p_barcode text)
 returns jsonb language sql stable security definer set search_path = '' as $$
@@ -213,12 +258,13 @@ returns boolean language sql stable security definer set search_path = '' as $$
   select exists (select 1 from public.access_codes where code = upper(trim(coalesce(p_code, ''))));
 $$;
 
--- The whole list of items, for someone holding a valid passcode.
+-- The whole list of items, for someone holding a valid passcode. Null when
+-- the passcode is wrong.
 create or replace function public.list_items_with_code(p_code text)
-returns jsonb language plpgsql stable security definer set search_path = '' as $$
+returns jsonb language plpgsql volatile security definer set search_path = '' as $$
 begin
-  if not public.access_code_ok(p_code) then
-    raise exception 'invalid passcode' using errcode = '28000';
+  if (public.use_access_code(p_code)).id is null then
+    return null;
   end if;
   return coalesce((
     select jsonb_agg(to_jsonb(x)) from (
@@ -230,10 +276,10 @@ end $$;
 
 -- Photos for up to 20 items at a time, for someone holding a valid passcode.
 create or replace function public.item_photos_with_code(p_code text, p_ids uuid[])
-returns jsonb language plpgsql stable security definer set search_path = '' as $$
+returns jsonb language plpgsql volatile security definer set search_path = '' as $$
 begin
-  if not public.access_code_ok(p_code) then
-    raise exception 'invalid passcode' using errcode = '28000';
+  if (public.use_access_code(p_code)).id is null then
+    return null;
   end if;
   return coalesce((
     select jsonb_agg(jsonb_build_object('item_id', p.item_id, 'data', p.data))
@@ -242,16 +288,36 @@ begin
   ), '[]'::jsonb);
 end $$;
 
+revoke all on function public.my_role(), public.is_staff(), public.is_super_admin() from public, anon;
+grant execute on function public.my_role(), public.is_staff(), public.is_super_admin() to authenticated;
+revoke all on function public.access_code_ok(text), public.use_access_code(text), public.caller_ip() from public, anon, authenticated;
+revoke all on function public.items_touch_updated_at() from public, anon, authenticated;
+revoke all on function public.lookup_item(text), public.list_items_with_code(text), public.item_photos_with_code(text, uuid[]) from public;
+grant execute on function public.lookup_item(text), public.list_items_with_code(text), public.item_photos_with_code(text, uuid[]) to anon, authenticated;
+
 -- What kind of passcode this is: 'view', 'cashier', or null when it is not valid.
 create or replace function public.access_code_kind(p_code text)
-returns text language sql stable security definer set search_path = '' as $$
-  select kind from public.access_codes where code = upper(trim(coalesce(p_code, '')));
+returns text language sql volatile security definer set search_path = '' as $$
+  select (public.use_access_code(p_code)).kind;
+$$;
+
+-- True when the caller typed their password within the last 10 minutes. Used
+-- to make changing or cancelling a sale need a fresh password, not just an
+-- open session. (A token carries the time of each sign-in in its "amr" claim.)
+create or replace function public.password_recent()
+returns boolean language sql stable set search_path = '' as $$
+  select coalesce((
+    select max((e ->> 'timestamp')::bigint)
+      from jsonb_array_elements(coalesce((select auth.jwt()) -> 'amr', '[]'::jsonb)) e
+     where e ->> 'method' = 'password'
+  ), 0) > extract(epoch from now()) - 600;
 $$;
 
 -- Records a sale made with a cashier passcode and takes the items out of stock.
 -- p_lines is a JSON array of {"item_id": "...", "qty": 2}. A line may add
 -- "price" to sell at a custom price; otherwise the item's own price is used.
--- Both prices are recorded. Nothing is sold beyond what is in stock.
+-- Both prices are recorded. Nothing is sold beyond what is in stock. Returns
+-- null when the passcode is not a cashier's.
 create or replace function public.record_sale(p_code text, p_lines jsonb)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
@@ -262,10 +328,9 @@ declare
   v_item public.items%rowtype;
   v_price numeric(12, 2);
 begin
-  select * into v_code from public.access_codes
-   where code = upper(trim(coalesce(p_code, ''))) and kind = 'cashier';
-  if not found then
-    raise exception 'invalid passcode' using errcode = '28000';
+  v_code := public.use_access_code(p_code);
+  if v_code.id is null or v_code.kind <> 'cashier' then
+    return null; -- not a cashier passcode
   end if;
   if p_lines is null or jsonb_typeof(p_lines) <> 'array' or jsonb_array_length(p_lines) = 0 then
     raise exception 'The cart is empty.' using errcode = 'P0001';
@@ -319,6 +384,9 @@ begin
   if not public.is_staff() then
     raise exception 'permission denied' using errcode = '42501';
   end if;
+  if not public.password_recent() then
+    raise exception 'Enter your password to confirm this change.' using errcode = 'P0001';
+  end if;
   select * into v_sale from public.sales where id = p_sale_id for update;
   if not found then
     raise exception 'That sale no longer exists.' using errcode = 'P0001';
@@ -352,6 +420,9 @@ declare
 begin
   if not public.is_staff() then
     raise exception 'permission denied' using errcode = '42501';
+  end if;
+  if not public.password_recent() then
+    raise exception 'Enter your password to confirm this change.' using errcode = 'P0001';
   end if;
   select * into v_sale from public.sales where id = p_sale_id for update;
   if not found then
@@ -414,6 +485,8 @@ begin
   return jsonb_build_object('sale_id', p_sale_id, 'total', v_total);
 end $$;
 
+revoke all on function public.password_recent() from public, anon;
+grant execute on function public.password_recent() to authenticated;
 revoke all on function public.edit_sale(uuid, jsonb) from public, anon;
 grant execute on function public.edit_sale(uuid, jsonb) to authenticated;
 
@@ -422,11 +495,6 @@ grant execute on function public.access_code_kind(text), public.record_sale(text
 revoke all on function public.void_sale(uuid) from public, anon;
 grant execute on function public.void_sale(uuid) to authenticated;
 
-revoke all on function public.my_role(), public.is_staff(), public.is_super_admin() from public, anon;
-grant execute on function public.my_role(), public.is_staff(), public.is_super_admin() to authenticated;
-revoke all on function public.access_code_ok(text) from public, anon, authenticated;
-revoke all on function public.lookup_item(text), public.list_items_with_code(text), public.item_photos_with_code(text, uuid[]) from public;
-grant execute on function public.lookup_item(text), public.list_items_with_code(text), public.item_photos_with_code(text, uuid[]) to anon, authenticated;
 
 -- Quantity +/- that stays correct when two people tap at the same time ----------
 -- Runs with the caller's rights, so only staff can change stock.
