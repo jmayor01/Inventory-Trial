@@ -10,6 +10,33 @@
 
 const $ = (id) => document.getElementById(id);
 
+// ---------- Where the sign-in is kept ----------
+// "Remember me" keeps the sign-in on this device until the user signs out.
+// Without it the sign-in lasts only until the browser (or the installed app)
+// is closed. Both pages hand this to Supabase as its storage.
+
+const REMEMBER_KEY = 'inventory.remember'; // '0' = do not remember; anything else = remember
+
+function setRemember(remember) {
+  try { localStorage.setItem(REMEMBER_KEY, remember ? '1' : '0'); } catch { /* storage blocked */ }
+}
+
+const authStorage = {
+  getItem(key) {
+    try { return sessionStorage.getItem(key) ?? localStorage.getItem(key); } catch { return null; }
+  },
+  setItem(key, value) {
+    try {
+      const remember = localStorage.getItem(REMEMBER_KEY) !== '0';
+      (remember ? localStorage : sessionStorage).setItem(key, value);
+      (remember ? sessionStorage : localStorage).removeItem(key); // never leave a copy in the other place
+    } catch { /* storage blocked: the sign-in then lasts until reload */ }
+  },
+  removeItem(key) {
+    try { sessionStorage.removeItem(key); localStorage.removeItem(key); } catch { /* ignore */ }
+  },
+};
+
 const ITEM_COLUMNS = 'id,barcode,name,description,price,qty,photo_updated_at,updated_at';
 
 const fromRow = (r) => ({ ...r, price: Number(r.price) || 0, qty: Number(r.qty) || 0 });

@@ -1,4 +1,5 @@
-// Creates and removes back-office accounts. Only a super admin may call it.
+// Creates and removes back-office accounts and resets their passwords. Only a
+// super admin may call it.
 //
 // The browser cannot create Supabase Auth users itself (that needs a secret
 // key), so the back office calls this function instead. It checks who is
@@ -80,6 +81,20 @@ Deno.serve(async (req) => {
     if (userId === caller.user.id) return json(400, { error: 'You cannot remove your own account.' });
     const { error } = await admin.auth.admin.deleteUser(userId); // the profile row goes with it
     if (error) return json(400, { error: error.message });
+    return json(200, { ok: true });
+  }
+
+  if (body.action === 'set_password') {
+    const userId = String(body.user_id ?? '');
+    const password = String(body.password ?? '');
+    if (!userId) return json(400, { error: 'No user was given.' });
+    if (password.length < 8) return json(400, { error: 'The password needs at least 8 characters.' });
+    const { data: target } = await admin.from('profiles').select('email').eq('user_id', userId).maybeSingle();
+    if (!target) return json(404, { error: 'That user no longer exists.' });
+    const { error } = await admin.auth.admin.updateUserById(userId, { password });
+    if (error) return json(400, { error: error.message });
+    // Wrong-password counts from before the reset no longer apply.
+    await admin.from('login_attempts').delete().eq('email', String(target.email).toLowerCase());
     return json(200, { ok: true });
   }
 

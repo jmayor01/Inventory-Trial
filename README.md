@@ -48,8 +48,10 @@ the app, so they hold even for someone who talks to the database directly.
 - **Access rules live in the database.** Every table has row level security,
   and nothing can be read or changed without signing in except through a few
   narrow functions (barcode lookup, passcode list, recording a sale).
-- **Passcode guessing is limited.** After 20 wrong passcodes from one address
+- **Passcode guessing is limited.** After 10 wrong passcodes from one address
   in 15 minutes, that address is refused for the rest of the 15 minutes.
+- **Sign-in rests after 10 wrong passwords** for an account within 15 minutes.
+  "Remember me" is off by default, so a sign-in ends when the browser closes.
   New passcodes must be at least 8 characters.
 - **Sales records need a fresh password.** Editing or cancelling a sale is
   refused by the database unless the account's password was entered in the
@@ -79,7 +81,7 @@ Open **Menu → Staff sign in**, or go to `/admin.html`.
   listed. A sale can be edited (quantities and prices) or cancelled; stock
   follows the change, and either one asks for your password first.
 - **Users** (super admin) — create admin or super admin accounts, change a
-  role, remove an account.
+  role, reset a forgotten password, remove an account.
 - **Passcodes** — create and delete the codes for people without an account:
   *view only*, or *cashier*, which can also record sales. Give each cashier
   their own so their sales can be told apart.

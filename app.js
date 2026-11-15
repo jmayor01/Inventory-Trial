@@ -18,7 +18,9 @@ const ROLE_KEY = 'inventory.role'; // last known role, so staff can open the app
 const LEGACY_KEY = 'inventory.items.v1'; // items from before the inventory was shared
 
 // The sign-in session is shared with the back office (same site, same storage).
-const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INVENTORY_CONFIG.supabaseKey);
+const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INVENTORY_CONFIG.supabaseKey, {
+  auth: { storage: authStorage },
+});
 
 /** @type {{id:string, barcode:string, name:string, description:string, price:number, qty:number, photo_updated_at:string|null}[]} */
 let items = [];
@@ -1139,6 +1141,13 @@ async function applySession(session) {
     }
     stored.remove(ROLE_KEY);
   }
+
+  // Not signed in (any more): a staff copy of the inventory must not linger,
+  // for instance after a sign-in without "Remember me" ended with the browser.
+  try {
+    const c = JSON.parse(stored.get(CACHE_KEY));
+    if (c && c.mode === 'staff') forgetInventory();
+  } catch { /* nothing cached */ }
 
   const code = stored.get(PASSCODE_KEY);
   if (!code) { enterPublic(); return; }

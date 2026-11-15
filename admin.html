@@ -28,13 +28,15 @@
   </header>
 
   <section id="loginView" class="login" aria-labelledby="loginTitle">
-    <form id="loginForm">
+    <form id="loginForm" novalidate>
       <h2 id="loginTitle">Sign in to the back office</h2>
       <p class="hint">For admins and the super admin.</p>
       <label for="lEmail">Email</label>
       <input id="lEmail" type="email" autocomplete="username" autocapitalize="off" required>
       <label for="lPassword">Password</label>
       <input id="lPassword" type="password" autocomplete="current-password" required>
+      <label class="check" for="lRemember"><input id="lRemember" type="checkbox"> Remember me on this device</label>
+      <p class="hint">Leave it off on a shared device: you are then signed out when the browser or app is closed.</p>
       <p id="loginError" class="error" role="alert" hidden></p>
       <button id="loginBtn" type="submit" class="btn primary">Sign in</button>
     </form>
@@ -124,7 +126,7 @@
 
     <div id="tab-users" class="tabpanel" hidden>
       <h2 class="section-title">Users</h2>
-      <p class="hint">An <strong>admin</strong> can do everything in the back office except manage user accounts. Only a <strong>super admin</strong> can add users, change roles and remove accounts.</p>
+      <p class="hint">An <strong>admin</strong> can do everything in the back office except manage user accounts. Only a <strong>super admin</strong> can add users, change roles, reset passwords and remove accounts.</p>
       <ul id="userList" class="list plain"></ul>
       <form id="userForm" class="card-form" novalidate>
         <h3>Add a user</h3>
@@ -260,6 +262,25 @@
         <span class="spacer"></span>
         <button type="button" id="saleCancel" class="btn">Cancel</button>
         <button type="submit" id="saleSave" class="btn primary">Save changes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Super admin: set a new password for an account -->
+  <dialog id="resetDlg" aria-labelledby="resetTitle">
+    <form id="resetForm" novalidate>
+      <h2 id="resetTitle" tabindex="-1">Reset password</h2>
+      <p class="hint">Set a new password for <strong id="resetEmail"></strong>. The old one stops working at once. Tell them the new password yourself; nothing is emailed.</p>
+      <label for="resetPassword">New password <span class="optional">at least 8 characters</span></label>
+      <div class="inline">
+        <input id="resetPassword" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" minlength="8" required>
+        <button type="button" id="resetRandom" class="btn">Suggest</button>
+      </div>
+      <p id="resetError" class="error" role="alert" hidden></p>
+      <div class="dlg-actions">
+        <span class="spacer"></span>
+        <button type="button" id="resetCancel" class="btn">Cancel</button>
+        <button type="submit" id="resetSave" class="btn primary">Set password</button>
       </div>
     </form>
   </dialog>

@@ -215,7 +215,7 @@ returns text language sql stable set search_path = '' as $$
 $$;
 
 -- Looks a passcode up. Returns its row, or a row of nulls when it is wrong.
--- After 20 wrong guesses from one address in 15 minutes, that address is
+-- After 10 wrong guesses from one address in 15 minutes, that address is
 -- refused for the rest of the 15 minutes, right passcode or not. Wrong guesses
 -- are reported by returning null rather than raising, because raising would
 -- undo the record of the guess.
@@ -227,7 +227,7 @@ declare
 begin
   if v_ip <> 'unknown' and (
     select count(*) from public.code_attempts where ip = v_ip and at > now() - interval '15 minutes'
-  ) >= 20 then
+  ) >= 10 then
     raise exception 'Too many wrong passcodes. Wait 15 minutes and try again.' using errcode = 'P0001';
   end if;
   select * into v_row from public.access_codes where code = upper(trim(coalesce(p_code, '')));
@@ -238,6 +238,59 @@ begin
   delete from public.code_attempts where at < now() - interval '1 day';
   return null;
 end $$;
+
+-- Wrong passwords at the sign-in screen, per email address, so that the app
+-- can make an account rest after 10 of them. (Supabase Auth applies its own
+-- limits to sign-in requests as well; this adds a per-account count.)
+create table if not exists public.login_attempts (
+  email text not null,
+  at timestamptz not null default now()
+);
+create index if not exists login_attempts_email_at on public.login_attempts (email, at);
+alter table public.login_attempts enable row level security;
+revoke all on public.login_attempts from anon, authenticated;
+
+-- How an email address stands: wrong passwords in the last 15 minutes, whether
+-- it is resting, and for how many more seconds. It rests once there are 10,
+-- until the oldest of those 10 is 15 minutes old.
+create or replace function public.login_status(p_email text)
+returns jsonb language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object(
+    'failed', count(*),
+    'locked', count(*) >= 10,
+    'wait_seconds', case when count(*) >= 10
+      then greatest(0, ceil(extract(epoch from (min(at) + interval '15 minutes' - now()))))::integer
+      else 0 end)
+  from (
+    select at from public.login_attempts
+     where email = lower(trim(coalesce(p_email, ''))) and at > now() - interval '15 minutes'
+     order by at desc limit 10
+  ) recent;
+$$;
+
+-- Counts one wrong password for an email address and returns its new standing.
+create or replace function public.login_failed(p_email text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  v_email text := lower(trim(coalesce(p_email, '')));
+begin
+  if v_email <> '' and length(v_email) <= 320 and not (public.login_status(v_email) ->> 'locked')::boolean then
+    insert into public.login_attempts (email) values (v_email);
+  end if;
+  delete from public.login_attempts where at < now() - interval '1 day';
+  return public.login_status(v_email);
+end $$;
+
+-- Clears the count for the account that has just signed in.
+create or replace function public.login_succeeded()
+returns void language sql security definer set search_path = '' as $$
+  delete from public.login_attempts where email = lower(coalesce((select auth.jwt()) ->> 'email', ''));
+$$;
+
+revoke all on function public.login_status(text), public.login_failed(text) from public;
+grant execute on function public.login_status(text), public.login_failed(text) to anon, authenticated;
+revoke all on function public.login_succeeded() from public, anon;
+grant execute on function public.login_succeeded() to authenticated;
 
 -- One item by its exact barcode, with its photo. Null when there is none.
 create or replace function public.lookup_item(p_barcode text)

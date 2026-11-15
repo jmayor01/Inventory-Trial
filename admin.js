@@ -10,7 +10,9 @@
 // item_costs table); "market price" is what it sells for (the item's `price`).
 // Shared helpers (photos, scanner, form bits) are in common.js.
 
-const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INVENTORY_CONFIG.supabaseKey);
+const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INVENTORY_CONFIG.supabaseKey, {
+  auth: { storage: authStorage },
+});
 
 /** Items as in the inventory app, plus `cost` (number, or null when not set). */
 let items = [];
@@ -346,17 +348,49 @@ $('exportBtn').addEventListener('click', () => {
 
 // ---------- Sign in / out ----------
 
+const MAX_WRONG_PASSWORDS = 10;
+
+function restMessage(seconds) {
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return `Too many wrong passwords for this account. Wait ${minutes} minute${minutes === 1 ? '' : 's'} and try again.`;
+}
+
+/**
+ * Signs in with a password, counting wrong ones per account: after 10 in 15
+ * minutes the account rests. Returns { ok: true } or { ok: false, message }.
+ */
+async function passwordSignIn(email, password) {
+  const before = await sb.rpc('login_status', { p_email: email });
+  if (before.data && before.data.locked) return { ok: false, message: restMessage(before.data.wait_seconds) };
+
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (!error) {
+    sb.rpc('login_succeeded').then(() => {}, () => {}); // clear the count; nothing depends on the answer
+    return { ok: true };
+  }
+  if (error.code !== 'invalid_credentials') {
+    return { ok: false, message: error.code === 'email_not_confirmed' ? 'This account\'s email address has not been confirmed yet.' : explain(error, 'Could not sign in. Please try again.') };
+  }
+  const after = await sb.rpc('login_failed', { p_email: email });
+  if (after.data && after.data.locked) return { ok: false, message: restMessage(after.data.wait_seconds), wrongPassword: true };
+  const left = after.data ? MAX_WRONG_PASSWORDS - after.data.failed : null;
+  return { ok: false, wrongPassword: true, left };
+}
+
 $('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const err = $('loginError');
   err.hidden = true;
+  const email = $('lEmail').value.trim();
+  if (!email || !$('lPassword').value) { err.textContent = 'Enter your email and password.'; err.hidden = false; return; }
   $('loginBtn').disabled = true;
-  const { error } = await sb.auth.signInWithPassword({ email: $('lEmail').value.trim(), password: $('lPassword').value });
+  setRemember($('lRemember').checked); // decides where the sign-in is kept
+  const result = await passwordSignIn(email, $('lPassword').value);
   $('loginBtn').disabled = false;
-  if (!error) { $('lPassword').value = ''; return; }
-  err.textContent = error.code === 'invalid_credentials' ? 'Wrong email or password.'
-    : error.code === 'email_not_confirmed' ? 'This account\'s email address has not been confirmed yet.'
-    : explain(error, 'Could not sign in. Please try again.');
+  $('lPassword').value = '';
+  if (result.ok) return;
+  err.textContent = result.message
+    || `Wrong email or password.${result.left != null && result.left <= 5 ? ` ${result.left} attempt${result.left === 1 ? '' : 's'} left before a 15-minute wait.` : ''}`;
   err.hidden = false;
 });
 
@@ -404,10 +438,11 @@ function confirmWithPassword({ title, text, ok, danger }) {
       if (!password) { showError('passwordError', 'Enter your password.'); $('passwordInput').focus(); return; }
       $('passwordOk').disabled = true;
       // Signing in again as the same account is how the password gets checked.
-      const { error } = await sb.auth.signInWithPassword({ email: userEmail, password });
+      const result = await passwordSignIn(userEmail, password);
       $('passwordOk').disabled = false;
-      if (error) {
-        showError('passwordError', error.code === 'invalid_credentials' ? 'That password is not right.' : explain(error, 'Could not check the password. Please try again.'));
+      if (!result.ok) {
+        showError('passwordError', result.message
+          || `That password is not right.${result.left != null && result.left <= 5 ? ` ${result.left} attempt${result.left === 1 ? '' : 's'} left before a 15-minute wait.` : ''}`);
         $('passwordInput').select();
         return;
       }
@@ -645,6 +680,16 @@ async function loadUsers() {
     const main = el('div', 'row-main');
     main.append(el('div', 'row-title', u.email || '(no email)'), el('div', 'hint', mine ? `${ROLE_NAMES[u.role]} · you` : ROLE_NAMES[u.role]));
     li.append(main);
+    // Anyone who forgot their password gets a new one here, the super admin included.
+    const reset = el('button', 'btn', mine ? 'Change my password' : 'Reset password');
+    reset.type = 'button';
+    reset.setAttribute('aria-label', mine ? 'Change my password' : `Reset the password of ${u.email}`);
+    reset.addEventListener('click', () => openReset(u));
+    if (mine) {
+      const actions = el('div', 'row-actions');
+      actions.append(reset);
+      li.append(actions);
+    }
     if (!mine) {
       const actions = el('div', 'row-actions');
       const select = el('select');
@@ -681,12 +726,62 @@ async function loadUsers() {
         }
         loadUsers();
       });
-      actions.append(select, remove);
+      actions.append(select, reset, remove);
       li.append(actions);
     }
     list.append(li);
   }
 }
+
+// ---- Resetting a password ----
+
+let resetUser = null;
+
+/** A random password without look-alike characters. */
+function randomPassword() {
+  const alphabet = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (const r of crypto.getRandomValues(new Uint8Array(12))) out += alphabet[r % alphabet.length];
+  return out;
+}
+
+function openReset(user) {
+  resetUser = user;
+  $('resetEmail').textContent = user.email;
+  $('resetPassword').value = '';
+  showError('resetError', '');
+  $('resetDlg').showModal();
+  $('resetPassword').focus();
+}
+
+$('resetRandom').addEventListener('click', () => { $('resetPassword').value = randomPassword(); });
+$('resetCancel').addEventListener('click', () => $('resetDlg').close());
+
+$('resetForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!resetUser) return;
+  const password = $('resetPassword').value;
+  showError('resetError', '');
+  if (password.length < 8) { showError('resetError', 'The password needs at least 8 characters.'); $('resetPassword').focus(); return; }
+  // Changing someone's password is as sensitive as it gets: confirm it is really you.
+  const sure = await confirmWithPassword({
+    title: `Set a new password for ${resetUser.email}?`,
+    text: 'Enter your own current password to confirm.',
+    ok: 'Set password',
+  });
+  if (!sure) return;
+  $('resetSave').disabled = true;
+  try {
+    await manageUsers({ action: 'set_password', user_id: resetUser.user_id, password });
+    $('resetPassword').value = '';
+    $('resetDlg').close();
+    toast(`New password set for ${resetUser.email}`);
+  } catch (err) {
+    showError('resetError', err.message);
+  } finally {
+    $('resetSave').disabled = false;
+  }
+});
 
 $('userForm').addEventListener('submit', async (e) => {
   e.preventDefault();
