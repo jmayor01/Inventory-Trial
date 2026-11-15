@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
     const { error } = await admin.auth.admin.updateUserById(userId, { password });
     if (error) return json(400, { error: error.message });
     // Wrong-password counts from before the reset no longer apply.
-    await admin.from('login_attempts').delete().eq('email', String(target.email).toLowerCase());
+    await admin.from('attempt_counters').update({ failed: 0 }).eq('kind', 'login').eq('who', String(target.email).toLowerCase());
     return json(200, { ok: true });
   }
 

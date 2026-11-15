@@ -194,15 +194,23 @@ grant select, update (role) on public.profiles to authenticated;
 -- These functions are the only way in for them. Each returns JSON so the app
 -- gets everything in one call.
 
--- Wrong passcode guesses, so that guessing can be slowed down. Only the
--- functions below touch this table.
-create table if not exists public.code_attempts (
-  ip text not null,
-  at timestamptz not null default now()
+-- Wrong tries, so that guessing can be slowed down: one counter per address
+-- (passcodes) or per email address (sign-ins). A counter covers a 15-minute
+-- window and starts again after it, so nothing ever needs cleaning up. Only
+-- the functions below touch this table.
+create table if not exists public.attempt_counters (
+  kind text not null check (kind in ('passcode', 'login')),
+  who text not null,
+  failed integer not null default 0,
+  window_start timestamptz not null default now(),
+  primary key (kind, who)
 );
-create index if not exists code_attempts_ip_at on public.code_attempts (ip, at);
-alter table public.code_attempts enable row level security;
-revoke all on public.code_attempts from anon, authenticated;
+alter table public.attempt_counters enable row level security;
+revoke all on public.attempt_counters from anon, authenticated;
+
+-- Earlier versions kept a row per wrong try in these tables.
+drop table if exists public.code_attempts;
+drop table if exists public.login_attempts;
 
 -- The caller's address as the API gateway reports it ('unknown' when it does not).
 create or replace function public.caller_ip()
@@ -214,58 +222,58 @@ returns text language sql stable set search_path = '' as $$
   from (select coalesce(nullif(current_setting('request.headers', true), ''), '{}')::json as h) x;
 $$;
 
+-- Adds one wrong try, starting a new 15-minute window if the last one is over.
+create or replace function public.count_failure(p_kind text, p_who text)
+returns void language sql security definer set search_path = '' as $$
+  insert into public.attempt_counters as c (kind, who, failed, window_start)
+  values (p_kind, p_who, 1, now())
+  on conflict (kind, who) do update set
+    failed = case when c.window_start < now() - interval '15 minutes' then 1 else c.failed + 1 end,
+    window_start = case when c.window_start < now() - interval '15 minutes' then now() else c.window_start end;
+$$;
+
+-- Where a counter stands: wrong tries in the current window, whether it is
+-- resting (10 or more), and for how many more seconds.
+create or replace function public.attempt_standing(p_kind text, p_who text)
+returns jsonb language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object(
+    'failed', coalesce(max(failed), 0),
+    'locked', coalesce(max(failed), 0) >= 10,
+    'wait_seconds', case when coalesce(max(failed), 0) >= 10
+      then greatest(0, ceil(extract(epoch from (max(window_start) + interval '15 minutes' - now()))))::integer
+      else 0 end)
+  from public.attempt_counters
+  where kind = p_kind and who = p_who and window_start > now() - interval '15 minutes';
+$$;
+
 -- Looks a passcode up. Returns its row, or a row of nulls when it is wrong.
--- After 10 wrong guesses from one address in 15 minutes, that address is
--- refused for the rest of the 15 minutes, right passcode or not. Wrong guesses
--- are reported by returning null rather than raising, because raising would
--- undo the record of the guess.
+-- After 10 wrong passcodes from one address in 15 minutes, that address is
+-- refused for the rest of the 15 minutes, right passcode or not. A wrong
+-- passcode is reported by returning null rather than raising, because raising
+-- would undo the count.
 create or replace function public.use_access_code(p_code text)
 returns public.access_codes language plpgsql security definer set search_path = '' as $$
 declare
   v_ip text := public.caller_ip();
   v_row public.access_codes%rowtype;
 begin
-  if v_ip <> 'unknown' and (
-    select count(*) from public.code_attempts where ip = v_ip and at > now() - interval '15 minutes'
-  ) >= 10 then
+  if v_ip <> 'unknown' and (public.attempt_standing('passcode', v_ip) ->> 'locked')::boolean then
     raise exception 'Too many wrong passcodes. Wait 15 minutes and try again.' using errcode = 'P0001';
   end if;
   select * into v_row from public.access_codes where code = upper(trim(coalesce(p_code, '')));
   if found then
     return v_row;
   end if;
-  insert into public.code_attempts (ip) values (v_ip);
-  delete from public.code_attempts where at < now() - interval '1 day';
+  perform public.count_failure('passcode', v_ip);
   return null;
 end $$;
 
--- Wrong passwords at the sign-in screen, per email address, so that the app
--- can make an account rest after 10 of them. (Supabase Auth applies its own
--- limits to sign-in requests as well; this adds a per-account count.)
-create table if not exists public.login_attempts (
-  email text not null,
-  at timestamptz not null default now()
-);
-create index if not exists login_attempts_email_at on public.login_attempts (email, at);
-alter table public.login_attempts enable row level security;
-revoke all on public.login_attempts from anon, authenticated;
-
--- How an email address stands: wrong passwords in the last 15 minutes, whether
--- it is resting, and for how many more seconds. It rests once there are 10,
--- until the oldest of those 10 is 15 minutes old.
+-- Sign-in: an account rests for 15 minutes after 10 wrong passwords. (Supabase
+-- Auth applies its own limits to sign-in requests as well; this adds a count
+-- per account, which the back office checks before and after each try.)
 create or replace function public.login_status(p_email text)
 returns jsonb language sql stable security definer set search_path = '' as $$
-  select jsonb_build_object(
-    'failed', count(*),
-    'locked', count(*) >= 10,
-    'wait_seconds', case when count(*) >= 10
-      then greatest(0, ceil(extract(epoch from (min(at) + interval '15 minutes' - now()))))::integer
-      else 0 end)
-  from (
-    select at from public.login_attempts
-     where email = lower(trim(coalesce(p_email, ''))) and at > now() - interval '15 minutes'
-     order by at desc limit 10
-  ) recent;
+  select public.attempt_standing('login', lower(trim(coalesce(p_email, ''))));
 $$;
 
 -- Counts one wrong password for an email address and returns its new standing.
@@ -274,19 +282,21 @@ returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
   v_email text := lower(trim(coalesce(p_email, '')));
 begin
-  if v_email <> '' and length(v_email) <= 320 and not (public.login_status(v_email) ->> 'locked')::boolean then
-    insert into public.login_attempts (email) values (v_email);
+  if v_email <> '' and length(v_email) <= 320
+     and not (public.attempt_standing('login', v_email) ->> 'locked')::boolean then
+    perform public.count_failure('login', v_email);
   end if;
-  delete from public.login_attempts where at < now() - interval '1 day';
-  return public.login_status(v_email);
+  return public.attempt_standing('login', v_email);
 end $$;
 
 -- Clears the count for the account that has just signed in.
 create or replace function public.login_succeeded()
 returns void language sql security definer set search_path = '' as $$
-  delete from public.login_attempts where email = lower(coalesce((select auth.jwt()) ->> 'email', ''));
+  update public.attempt_counters set failed = 0
+   where kind = 'login' and who = lower(coalesce((select auth.jwt()) ->> 'email', ''));
 $$;
 
+revoke all on function public.count_failure(text, text), public.attempt_standing(text, text) from public, anon, authenticated;
 revoke all on function public.login_status(text), public.login_failed(text) from public;
 grant execute on function public.login_status(text), public.login_failed(text) to anon, authenticated;
 revoke all on function public.login_succeeded() from public, anon;
