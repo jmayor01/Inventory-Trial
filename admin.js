@@ -329,6 +329,7 @@ $('fDelete').addEventListener('click', async () => {
 
 const LABEL_DOTS_PER_MM = 8;
 const LABEL_SIZE_KEY = 'inventory.labelSize';
+const LABEL_PARTS_KEY = 'inventory.labelParts'; // whether the name and the price are shown
 
 /** EAN-13 when the code is a valid one, otherwise Code 128, which takes any text. */
 function barcodeFormat(code) {
@@ -416,7 +417,10 @@ function refreshLabel() {
   showError('labelError', message);
   $('labelDownload').disabled = Boolean(message);
   $('labelShare').disabled = Boolean(message);
-  try { localStorage.setItem(LABEL_SIZE_KEY, $('labelSize').value); } catch { /* not remembered */ }
+  try {
+    localStorage.setItem(LABEL_SIZE_KEY, $('labelSize').value);
+    localStorage.setItem(LABEL_PARTS_KEY, JSON.stringify({ name: $('labelName').checked, price: $('labelPrice').checked }));
+  } catch { /* not remembered */ }
 }
 
 function labelFile() {
@@ -436,6 +440,8 @@ $('fLabel').addEventListener('click', () => {
   try {
     const saved = localStorage.getItem(LABEL_SIZE_KEY);
     if (saved && [...$('labelSize').options].some((o) => o.value === saved)) $('labelSize').value = saved;
+    const parts = JSON.parse(localStorage.getItem(LABEL_PARTS_KEY));
+    if (parts) { $('labelName').checked = parts.name !== false; $('labelPrice').checked = parts.price !== false; }
   } catch { /* use the default size */ }
   // Sharing an image file straight to another app only exists on phones.
   const probe = new File([''], 'label.png', { type: 'image/png' });
