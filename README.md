@@ -94,7 +94,9 @@ Open **Menu → Staff sign in**, or go to `/admin.html`.
 - **Passcodes** — create and delete the codes for people without an account:
   *view only*, or *cashier*, which can also record sales. Give each cashier
   their own so their sales can be told apart.
-- **Export CSV** — with original price and profit columns.
+- **Export Excel** — an .xlsx file laid out like the shop's inventory sheet:
+  Qty, Particular, Orig Price, SRP, Profit, TOTAL and Barcode. It can be
+  imported again.
 
 Once signed in, the inventory app itself also unlocks adding, editing, stock
 +/− and CSV import/export.

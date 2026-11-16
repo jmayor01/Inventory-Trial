@@ -704,27 +704,53 @@ $('labelShare').addEventListener('click', async () => {
 
 // ---------- Export ----------
 
+// The file follows the shop's own inventory sheet: a title row, then
+// Qty | Particular | Orig Price | SRP | Profit | TOTAL, plus Barcode. Profit and
+// TOTAL are formulas, as in that sheet, so they follow any edits made in Excel.
+// The same file can be imported again with the Import button.
+const EXPORT_CURRENCY = '₱';
+
 $('exportBtn').addEventListener('click', () => {
-  const num = (v) => (v == null ? '' : v.toFixed(2));
-  const header = ['barcode', 'name', 'description', 'original_price', 'market_price', 'profit_per_unit', 'margin_percent', 'qty', 'expected_profit'];
-  const lines = [header.join(',')];
-  for (const it of [...items].sort(SORTS.name)) {
-    const m = margin(it);
-    lines.push([
-      it.barcode, it.name, it.description,
-      num(it.cost), num(it.price), num(unitProfit(it)), m == null ? '' : (m * 100).toFixed(1), it.qty, num(stockProfit(it)),
-    ].map(csvCell).join(','));
-  }
-  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const S = XLSX_STYLE;
+  const today = new Date();
+  const title = `INVENTORY as of ${today.toLocaleDateString(undefined, { dateStyle: 'medium' })}`;
+  const headers = ['Qty', 'Particular', 'Orig Price', 'SRP', 'Profit', 'TOTAL', 'Barcode'];
+  const rows = [
+    [{ text: title, style: S.title }, ...headers.slice(1).map(() => ({ text: '', style: S.title }))],
+    headers.map((h) => ({ text: h, style: S.header })),
+  ];
+  const sorted = [...items].sort(SORTS.name);
+  sorted.forEach((it, i) => {
+    const r = i + 3; // the sheet row this product is on
+    const profit = unitProfit(it);
+    rows.push([
+      { number: it.qty, style: S.number },
+      { text: it.name, style: S.text },
+      hasCost(it) ? { number: it.cost, style: S.number } : { text: '', style: S.number },
+      { number: it.price, style: S.number },
+      // Blank when there is no original price, rather than a misleading figure.
+      { formula: `IF(OR(C${r}="",D${r}=""),0,D${r}-C${r})`, number: profit == null ? 0 : Math.round(profit * 100) / 100, style: S.number },
+      { formula: `A${r}*D${r}`, number: Math.round(it.qty * it.price * 100) / 100, style: S.money },
+      { text: it.barcode || '', style: S.text },
+    ]);
+  });
+  const blob = makeXlsx({
+    sheetName: 'Inventory',
+    rows,
+    widths: [8, 42, 12, 12, 12, 16, 20],
+    merges: ['A1:G1'],
+    currency: EXPORT_CURRENCY,
+  });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `inventory-profit-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `inventory-${today.toISOString().slice(0, 10)}.xlsx`;
   document.body.append(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   toast(`Exported ${items.length} product${items.length === 1 ? '' : 's'}`);
 });
+
 
 // ---------- Sign in / out ----------
 
