@@ -474,6 +474,20 @@ select {
   .product { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 2fr); align-items: center; gap: 16px; }
   .figures { grid-template-columns: repeat(6, 1fr); margin: 0; }
 }
+.import-help { margin: 10px 0 12px; font-size: .9rem; }
+.import-help summary { cursor: pointer; color: var(--primary); font-weight: 600; min-height: 36px; }
+.import-help ul { margin: 6px 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.import-summary { margin-top: 14px; font-weight: 700; }
+.import-notes { margin: 8px 0 0; padding-left: 1.2em; color: var(--muted); font-size: .9rem; display: grid; gap: 4px; }
+.import-table-wrap { margin: 12px 0 4px; overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+.import-table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+.import-table th, .import-table td { padding: 7px 9px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.import-table th { color: var(--muted); font-weight: 600; background: var(--surface-2); }
+.import-table td:first-child { white-space: normal; min-width: 130px; }
+.import-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.import-table .more { color: var(--muted); }
+.import-table tr:last-child td { border-bottom: 0; }
+#importDlg select { width: 100%; }
 .link-row { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .label-preview {
   margin-top: 12px; padding: 14px; border-radius: 12px;

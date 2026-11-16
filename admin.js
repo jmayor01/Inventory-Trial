@@ -322,6 +322,235 @@ $('fDelete').addEventListener('click', async () => {
   }
 });
 
+// ---------- Import from Excel or CSV ----------
+// Reads a sheet with a header row, wherever that row is (a title above it is
+// fine), and adds or updates products. Blank cells are accepted: a new product
+// gets 0 for a blank quantity or price, and an existing one keeps what it had.
+
+const IMPORT_COLUMNS = {
+  name: ['particular', 'particulars', 'name', 'item', 'item name', 'product', 'product name', 'items', 'products'],
+  qty: ['qty', 'quantity', 'stock', 'stocks', 'count', 'pcs', 'on hand'],
+  cost: ['orig price', 'original price', 'orig. price', 'cost', 'cost price', 'unit cost', 'capital', 'buying price', 'purchase price'],
+  price: ['srp', 'price', 'selling price', 'market price', 'retail price', 'sell price', 'unit price'],
+  barcode: ['barcode', 'bar code', 'code', 'sku', 'upc', 'ean', 'item code', 'product code'],
+  description: ['description', 'desc', 'notes', 'note', 'remarks', 'details'],
+};
+
+let importSheets = [];
+let importPlan = null; // { rows: [...], fresh, changed }
+
+const headerKey = (text) => String(text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+/** Finds the header row (the first with a product-name column) and which column is which. */
+function findHeader(rows) {
+  for (let r = 0; r < Math.min(rows.length, 30); r++) {
+    const cols = {};
+    (rows[r] || []).forEach((cell, c) => {
+      const key = headerKey(cell);
+      for (const [field, names] of Object.entries(IMPORT_COLUMNS)) {
+        if (cols[field] === undefined && names.includes(key)) cols[field] = c;
+      }
+    });
+    if (cols.name !== undefined) return { row: r, cols };
+  }
+  return null;
+}
+
+/** A cell as a number, or null when it is blank or not a number. */
+function cellNumber(text) {
+  const clean = String(text ?? '').trim().replace(/,/g, '');
+  if (clean === '') return null;
+  const n = Number(clean);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** A barcode cell as text. Excel may hand a long number over as 4.806E+12. */
+function cellBarcode(text) {
+  const clean = String(text ?? '').trim();
+  if (/^\d+(\.0+)?$/.test(clean)) return clean.replace(/\.0+$/, '');
+  if (/^\d(\.\d+)?e\+?\d+$/i.test(clean)) return Number(clean).toFixed(0);
+  return clean;
+}
+
+function planImport(sheet) {
+  const header = findHeader(sheet.rows);
+  if (!header) return { error: 'No header row was found. The sheet needs a column headed Name, Particular, Item or Product.' };
+  const { cols } = header;
+  const cell = (row, field) => (cols[field] === undefined ? '' : String(row[cols[field]] ?? '').trim());
+
+  const byBarcode = new Map(items.filter((it) => it.barcode).map((it) => [it.barcode, it]));
+  const byName = new Map(items.map((it) => [it.name.trim().toLowerCase(), it]));
+  const seen = new Map(); // key -> index in out, so a product listed twice is imported once
+  const out = [];
+  let noName = 0, repeated = 0;
+
+  for (const row of sheet.rows.slice(header.row + 1)) {
+    if (!row || !row.some((x) => String(x ?? '').trim() !== '')) continue;
+    const name = cell(row, 'name');
+    if (!name) { noName += 1; continue; }
+    const barcode = cellBarcode(cell(row, 'barcode'));
+    const existing = (barcode && byBarcode.get(barcode)) || byName.get(name.toLowerCase()) || null;
+    const entry = {
+      name, barcode,
+      description: cell(row, 'description'),
+      qty: cols.qty === undefined ? null : cellNumber(cell(row, 'qty')),
+      price: cols.price === undefined ? null : cellNumber(cell(row, 'price')),
+      cost: cols.cost === undefined ? null : cellNumber(cell(row, 'cost')),
+      existing,
+    };
+    if (entry.qty != null) entry.qty = Math.round(entry.qty);
+    const key = existing ? `id:${existing.id}` : barcode ? `b:${barcode}` : `n:${name.toLowerCase()}`;
+    if (seen.has(key)) { out[seen.get(key)] = entry; repeated += 1; } else { seen.set(key, out.length); out.push(entry); }
+  }
+
+  // Two different products must not end up with the same barcode.
+  const taken = new Map(items.filter((it) => it.barcode).map((it) => [it.barcode, it.id]));
+  let clash = 0;
+  for (const e of out) {
+    if (!e.barcode) continue;
+    const owner = taken.get(e.barcode);
+    const me = e.existing ? e.existing.id : e;
+    if (owner !== undefined && owner !== me) { e.barcode = ''; clash += 1; } else taken.set(e.barcode, me);
+  }
+
+  return {
+    rows: out, cols, noName, repeated, clash,
+    fresh: out.filter((e) => !e.existing).length,
+    changed: out.filter((e) => e.existing).length,
+  };
+}
+
+function showImportPlan() {
+  const sheet = importSheets[Number($('importSheet').value) || 0];
+  const plan = planImport(sheet);
+  importPlan = null;
+  $('importFound').hidden = true;
+  $('importGo').hidden = true;
+  showError('importError', '');
+  if (plan.error) { showError('importError', plan.error); return; }
+  if (!plan.rows.length) { showError('importError', 'No products were found under the header row.'); return; }
+  importPlan = plan;
+
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  $('importSummary').textContent = `${plural(plan.rows.length, 'product')} found: ${plan.fresh} new, ${plan.changed} already in the inventory (will be updated).`;
+  const notes = [];
+  const found = Object.keys(IMPORT_COLUMNS).filter((f) => plan.cols[f] !== undefined);
+  const label = { name: 'name', qty: 'quantity', cost: 'original price', price: 'market price', barcode: 'barcode', description: 'description' };
+  notes.push(`Columns read: ${found.map((f) => label[f]).join(', ')}.`);
+  const blank = (f) => plan.rows.filter((e) => e[f] == null).length;
+  if (plan.cols.price !== undefined && blank('price')) notes.push(`${plural(blank('price'), 'product')} with no market price: new ones get 0, existing ones keep theirs.`);
+  if (plan.cols.cost !== undefined && blank('cost')) notes.push(`${plural(blank('cost'), 'product')} with no original price: left without one (not counted in profit).`);
+  if (plan.cols.qty !== undefined && blank('qty')) notes.push(`${plural(blank('qty'), 'product')} with no quantity: new ones get 0, existing ones keep theirs.`);
+  if (plan.cols.barcode === undefined) notes.push('No barcode column. Products are matched to existing ones by name.');
+  if (plan.noName) notes.push(`${plural(plan.noName, 'row')} skipped because the name is blank.`);
+  if (plan.repeated) notes.push(`${plural(plan.repeated, 'product')} listed more than once: the last row is used.`);
+  if (plan.clash) notes.push(`${plural(plan.clash, 'barcode')} already belong to another product and will be left off.`);
+  $('importNotes').replaceChildren(...notes.map((n) => el('li', '', n)));
+
+  const table = $('importTable');
+  table.replaceChildren();
+  const headRow = el('tr');
+  for (const h of ['Name', 'Qty', 'Original', 'Market', 'Barcode', '']) headRow.append(el('th', '', h));
+  table.append(headRow);
+  const show = (v) => (v == null ? '—' : typeof v === 'number' ? (Number.isInteger(v) ? String(v) : money.format(v)) : v || '—');
+  for (const e of plan.rows.slice(0, 8)) {
+    const tr = el('tr');
+    tr.append(el('td', '', e.name), el('td', 'num', show(e.qty)), el('td', 'num', show(e.cost)), el('td', 'num', show(e.price)), el('td', '', show(e.barcode)), el('td', '', e.existing ? 'update' : 'new'));
+    table.append(tr);
+  }
+  if (plan.rows.length > 8) {
+    const more = el('tr');
+    const td = el('td', 'more', `… and ${plan.rows.length - 8} more`);
+    td.colSpan = 6;
+    more.append(td);
+    table.append(more);
+  }
+  $('importFound').hidden = false;
+  $('importGo').hidden = false;
+  $('importGo').textContent = `Import ${plural(plan.rows.length, 'product')}`;
+}
+
+$('importBtn').addEventListener('click', () => {
+  importSheets = [];
+  importPlan = null;
+  $('importSheetRow').hidden = true;
+  $('importFound').hidden = true;
+  $('importGo').hidden = true;
+  $('importGenerate').checked = false;
+  showError('importError', '');
+  $('importDlg').showModal();
+  $('importTitle').focus();
+});
+$('importClose').addEventListener('click', () => $('importDlg').close());
+$('importPick').addEventListener('click', () => $('importFile').click());
+$('importSheet').addEventListener('change', showImportPlan);
+
+$('importFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  $('importFound').hidden = true;
+  $('importGo').hidden = true;
+  showError('importError', '');
+  try {
+    importSheets = await readWorkbook(file);
+  } catch (err) {
+    showError('importError', err.message || 'That file could not be read.');
+    return;
+  }
+  const select = $('importSheet');
+  select.replaceChildren(...importSheets.map((s, i) => { const o = el('option', '', s.name); o.value = String(i); return o; }));
+  // Start on the first sheet that has a recognisable header row.
+  const firstGood = importSheets.findIndex((s) => findHeader(s.rows));
+  select.value = String(Math.max(0, firstGood));
+  $('importSheetRow').hidden = importSheets.length < 2;
+  showImportPlan();
+});
+
+$('importGo').addEventListener('click', async () => {
+  if (!importPlan) return;
+  const plan = importPlan;
+  const generate = $('importGenerate').checked;
+  $('importGo').disabled = true;
+  $('importGo').textContent = 'Importing…';
+  showError('importError', '');
+  try {
+    // New barcodes must differ from each other as well as from existing ones.
+    const made = new Set();
+    const newBarcode = () => { for (;;) { const c = generateBarcode(); if (!made.has(c)) { made.add(c); return c; } } };
+
+    const fresh = [], updates = [], costs = [];
+    for (const e of plan.rows) {
+      if (e.existing) {
+        const row = { id: e.existing.id, name: e.name, barcode: e.barcode || e.existing.barcode || (generate ? newBarcode() : ''), description: e.description || e.existing.description, price: e.price ?? e.existing.price, qty: e.qty ?? e.existing.qty };
+        updates.push(row);
+        if (e.cost != null) costs.push({ item_id: row.id, cost: e.cost, updated_at: new Date().toISOString() });
+      } else {
+        const row = { id: crypto.randomUUID(), name: e.name, barcode: e.barcode || (generate ? newBarcode() : ''), description: e.description, price: e.price ?? 0, qty: e.qty ?? 0 };
+        fresh.push(row);
+        if (e.cost != null) costs.push({ item_id: row.id, cost: e.cost, updated_at: new Date().toISOString() });
+      }
+    }
+    const send = async (table, rows) => {
+      for (let i = 0; i < rows.length; i += 500) {
+        const { error } = await sb.from(table).upsert(rows.slice(i, i + 500));
+        if (error) throw error;
+      }
+    };
+    await send('items', fresh);
+    await send('items', updates);
+    await send('item_costs', costs);
+    $('importDlg').close();
+    toast(`Imported: ${fresh.length} added, ${updates.length} updated`);
+  } catch (err) {
+    showError('importError', `${explain(err, 'The import stopped part-way.')} Products saved before the problem are kept; you can import the file again safely.`);
+  } finally {
+    $('importGo').disabled = false;
+    await refreshQuietly();
+    if ($('importDlg').open) showImportPlan();
+  }
+});
+
 // ---------- Barcode labels ----------
 // Draws a label (name, barcode, price) as an image at the printer's own
 // resolution, to be printed from the label printer's app. Sized for the

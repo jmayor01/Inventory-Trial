@@ -72,6 +72,12 @@ Open **Menu → Staff sign in**, or go to `/admin.html`.
 
 - **Products** — add, edit and delete. **No barcode? Generate one** makes up a
   valid EAN-13 starting with 2 (the range reserved for a shop's own codes).
+- **Import** — reads an Excel (.xlsx) or CSV list of products. The header row
+  can be anywhere near the top; columns are recognised by name (Particular or
+  Name, Qty, Orig Price, SRP, and optionally Barcode and Description), blank
+  cells are accepted, and extra columns such as Profit and Total are ignored.
+  Products already in the inventory are updated, matched by barcode or, without
+  one, by name. It can generate barcodes for products that have none.
 - **Print label** — in the product form, makes a label image (name, barcode,
   price) sized for a NIIMBOT B1 (50×30, 40×30, 40×20 or 30×20 mm). Share or
   save it and print it from the NIIMBOT app.
@@ -162,6 +168,7 @@ it from a phone over plain `http://<ip>` will not — use a deployed https link.
 | `index.html`, `app.js` | The inventory app |
 | `admin.html`, `admin.js` | The back office |
 | `common.js`, `styles.css` | Code and styles both pages share |
+| `sheet-reader.js` | Reads Excel and CSV files in the browser |
 | `config.js` | Which Supabase project to use |
 | `supabase/setup.sql` | Database tables and access rules |
 | `supabase/functions/manage-users` | Server function that creates and removes accounts |

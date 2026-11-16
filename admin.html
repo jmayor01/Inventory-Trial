@@ -85,6 +85,7 @@
           <option value="margin">Sort: lowest margin</option>
           <option value="stock">Sort: lowest stock</option>
         </select>
+        <button id="importBtn" type="button" class="btn">Import</button>
         <button id="exportBtn" type="button" class="btn">Export CSV</button>
         <button id="addBtn" type="button" class="btn primary"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add product</span></button>
       </div>
@@ -269,6 +270,42 @@
     </form>
   </dialog>
 
+  <!-- Import products from an Excel or CSV file -->
+  <dialog id="importDlg" aria-labelledby="importTitle">
+    <h2 id="importTitle" tabindex="-1">Import products</h2>
+    <p class="hint">Choose an Excel (.xlsx) or CSV file. It needs a header row with a column for the product name; everything else is optional and may be left blank.</p>
+    <details class="import-help">
+      <summary>Which columns are read?</summary>
+      <ul>
+        <li><strong>Name</strong> — headed Particular, Name, Item or Product</li>
+        <li><strong>Quantity</strong> — Qty, Quantity or Stock</li>
+        <li><strong>Original price</strong> — Orig Price, Original Price or Cost</li>
+        <li><strong>Market price</strong> — SRP, Price or Selling Price</li>
+        <li><strong>Barcode</strong> — Barcode, Code or SKU</li>
+        <li><strong>Description</strong> — Description or Notes</li>
+      </ul>
+      <p class="hint">Other columns, such as Profit and Total, are ignored: the app works those out itself.</p>
+    </details>
+    <button type="button" id="importPick" class="btn">Choose file</button>
+    <input id="importFile" type="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>
+    <div id="importSheetRow" hidden>
+      <label for="importSheet">Sheet</label>
+      <select id="importSheet"></select>
+    </div>
+    <div id="importFound" hidden>
+      <p id="importSummary" class="import-summary" role="status"></p>
+      <ul id="importNotes" class="import-notes"></ul>
+      <div class="import-table-wrap"><table id="importTable" class="import-table"></table></div>
+      <label class="check" for="importGenerate"><input id="importGenerate" type="checkbox"> Generate a barcode for products that have none</label>
+    </div>
+    <p id="importError" class="error" role="alert" hidden></p>
+    <div class="dlg-actions">
+      <span class="spacer"></span>
+      <button type="button" id="importClose" class="btn">Close</button>
+      <button type="button" id="importGo" class="btn primary" hidden>Import</button>
+    </div>
+  </dialog>
+
   <!-- Barcode label, as an image for a label printer's app -->
   <dialog id="labelDlg" aria-labelledby="labelTitle">
     <h2 id="labelTitle" tabindex="-1">Print label</h2>
@@ -345,6 +382,7 @@
   <script src="vendor/supabase.js"></script>
   <script src="vendor/JsBarcode.all.min.js"></script>
   <script src="config.js"></script>
+  <script src="sheet-reader.js"></script>
   <script src="common.js"></script>
   <script src="admin.js"></script>
 </body>

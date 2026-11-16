@@ -1,12 +1,13 @@
 // Offline support: try the network first so updates show up immediately,
 // fall back to the cached copy when there is no connection.
-const CACHE = 'inventory-v19';
+const CACHE = 'inventory-v20';
 const ASSETS = [
   './',
   'index.html',
   'styles.css',
   'app.js',
   'common.js',
+  'sheet-reader.js',
   'admin.html',
   'admin.js',
   'config.js',
