@@ -309,7 +309,7 @@
   <!-- Barcode label, as an image for a label printer's app -->
   <dialog id="labelDlg" aria-labelledby="labelTitle">
     <h2 id="labelTitle" tabindex="-1">Print label</h2>
-    <p class="hint">This makes a label image sized for a NIIMBOT B1. Share it to the NIIMBOT app (or save it and open it there) and print from the app.</p>
+    <p class="hint">A label sized for a NIIMBOT B1. Print it straight to the printer, or share the image to the NIIMBOT app and print from there.</p>
     <div class="label-preview"><canvas id="labelCanvas" role="img" aria-label="Label preview"></canvas></div>
     <label for="labelSize">Label size</label>
     <select id="labelSize">
@@ -320,6 +320,16 @@
     </select>
     <label class="check" for="labelName"><input id="labelName" type="checkbox" checked> Show the product name</label>
     <label class="check" for="labelPrice"><input id="labelPrice" type="checkbox" checked> Show the price</label>
+    <div id="labelDirect" class="label-direct" hidden>
+      <label for="labelCopies">Copies</label>
+      <div class="inline">
+        <input id="labelCopies" type="number" inputmode="numeric" min="1" max="50" step="1" value="1">
+        <button type="button" id="labelPrint" class="btn primary">Print to NIIMBOT</button>
+      </div>
+      <p class="hint">Turn the printer on and close the NIIMBOT app first. The first time, pick the printer from the list your browser shows.</p>
+    </div>
+    <p id="labelNoDirect" class="hint" hidden>Printing straight to the printer needs Chrome on Android or on a computer. On this device, share or save the image and print it from the NIIMBOT app.</p>
+    <p id="labelStatus" class="status" role="status" hidden></p>
     <p id="labelError" class="error" role="alert" hidden></p>
     <div class="dlg-actions">
       <button type="button" id="labelClose" class="btn">Close</button>
@@ -381,6 +391,7 @@
   <script src="vendor/barcode-detector.js"></script>
   <script src="vendor/supabase.js"></script>
   <script src="vendor/JsBarcode.all.min.js"></script>
+  <script src="vendor/niimbluelib.min.js"></script>
   <script src="config.js"></script>
   <script src="sheet-reader.js"></script>
   <script src="common.js"></script>

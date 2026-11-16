@@ -579,10 +579,11 @@ function fitText(ctx, text, maxWidth) {
 }
 
 /** Draws the label; returns an error message, or '' when it worked. */
-function drawLabel() {
-  const canvas = $('labelCanvas');
+function drawLabel(canvas = $('labelCanvas'), maxWidth = Infinity) {
   const [wMm, hMm] = $('labelSize').value.split('x').map(Number);
-  const W = wMm * LABEL_DOTS_PER_MM;
+  // maxWidth is the printer's print head when printing directly: a B1 prints
+  // 48 mm across, so a 50 mm label is drawn 48 mm wide and sits centred.
+  const W = Math.min(wMm * LABEL_DOTS_PER_MM, maxWidth);
   const H = hMm * LABEL_DOTS_PER_MM;
   canvas.width = W;
   canvas.height = H;
@@ -646,6 +647,7 @@ function refreshLabel() {
   showError('labelError', message);
   $('labelDownload').disabled = Boolean(message);
   $('labelShare').disabled = Boolean(message);
+  $('labelPrint').disabled = Boolean(message);
   try {
     localStorage.setItem(LABEL_SIZE_KEY, $('labelSize').value);
     localStorage.setItem(LABEL_PARTS_KEY, JSON.stringify({ name: $('labelName').checked, price: $('labelPrice').checked }));
@@ -675,6 +677,9 @@ $('fLabel').addEventListener('click', () => {
   // Sharing an image file straight to another app only exists on phones.
   const probe = new File([''], 'label.png', { type: 'image/png' });
   $('labelShare').hidden = !(navigator.canShare && navigator.canShare({ files: [probe] }));
+  $('labelDirect').hidden = !canPrintDirect();
+  $('labelNoDirect').hidden = canPrintDirect();
+  setPrintStatus('');
   refreshLabel();
   $('labelDlg').showModal();
   $('labelTitle').focus();
@@ -693,6 +698,76 @@ $('labelDownload').addEventListener('click', async () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   toast('Label image saved');
 });
+
+// ---- Printing straight to a NIIMBOT printer over Bluetooth ----
+// Works where the browser can talk to Bluetooth devices: Chrome or Edge on
+// Android and on computers, not on iPhone or iPad. It uses NiimBlueLib, a
+// community library (NIIMBOT publishes no official way), so sharing the image
+// to the NIIMBOT app stays available as the dependable route.
+
+let labelPrinter = null; // stays connected between labels
+
+const canPrintDirect = () => Boolean(navigator.bluetooth) && typeof niimbluelib !== 'undefined';
+
+function setPrintStatus(text) {
+  $('labelStatus').textContent = text;
+  $('labelStatus').hidden = !text;
+}
+
+async function printLabelDirect() {
+  const copies = Math.min(50, Math.max(1, Math.round(Number($('labelCopies').value) || 1)));
+  $('labelCopies').value = String(copies);
+  showError('labelError', '');
+  $('labelPrint').disabled = true;
+  try {
+    if (!labelPrinter || !labelPrinter.isConnected()) {
+      setPrintStatus('Choose your printer in the list that opens…');
+      const client = new niimbluelib.NiimbotBluetoothClient();
+      await client.connect(); // shows the browser's own list of nearby printers
+      labelPrinter = client;
+    }
+    const meta = labelPrinter.getModelMetadata() || {};
+    const taskName = labelPrinter.getPrintTaskType() || 'B1';
+
+    // Draw the label again at the width this printer can actually print.
+    const canvas = document.createElement('canvas');
+    const problem = drawLabel(canvas, meta.printheadPixels || 384);
+    if (problem) throw new Error(problem);
+    const image = niimbluelib.ImageEncoder.encodeCanvas(canvas, niimbluelib.PageColorType.SingleColor, meta.printDirection || 'top');
+
+    setPrintStatus(`Printing ${copies} label${copies === 1 ? '' : 's'}…`);
+    const task = labelPrinter.protocol.newPrintTask(taskName, {
+      totalPages: copies,
+      density: meta.densityDefault || 3,
+      labelType: niimbluelib.LabelType.WithGaps,
+      statusPollIntervalMs: 200,
+      statusTimeoutMs: 15000,
+    });
+    try {
+      await task.printInit();
+      await task.printPage(image, copies);
+      await task.waitForFinished();
+    } finally {
+      await labelPrinter.protocol.printEnd().catch(() => {});
+    }
+    setPrintStatus('');
+    toast(`Printed ${copies} label${copies === 1 ? '' : 's'}`);
+  } catch (e) {
+    setPrintStatus('');
+    const name = (e && e.name) || '';
+    if (name === 'NotFoundError') return; // the printer list was closed without choosing
+    if (labelPrinter && !labelPrinter.isConnected()) labelPrinter = null;
+    const reason = (e && e.message) || 'unknown problem';
+    showError('labelError', name === 'SecurityError' || name === 'NotAllowedError'
+      ? 'Bluetooth is not allowed here. Allow Bluetooth (and, on Android, Location) for the browser, then try again.'
+      : `Could not print directly (${reason}). Check that the printer is on, has labels and is not connected to the NIIMBOT app, or use Share / Save image instead.`);
+  } finally {
+    $('labelPrint').disabled = false;
+  }
+}
+
+$('labelPrint').addEventListener('click', printLabelDirect);
+window.addEventListener('pagehide', () => { if (labelPrinter) labelPrinter.disconnect().catch(() => {}); });
 
 $('labelShare').addEventListener('click', async () => {
   try {

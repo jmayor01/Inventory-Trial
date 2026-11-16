@@ -1,6 +1,6 @@
 // Offline support: try the network first so updates show up immediately,
 // fall back to the cached copy when there is no connection.
-const CACHE = 'inventory-v21';
+const CACHE = 'inventory-v22';
 const ASSETS = [
   './',
   'index.html',
@@ -15,6 +15,7 @@ const ASSETS = [
   'vendor/zxing_reader.wasm',
   'vendor/supabase.js',
   'vendor/JsBarcode.all.min.js',
+  'vendor/niimbluelib.min.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

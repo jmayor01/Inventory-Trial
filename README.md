@@ -79,8 +79,10 @@ Open **Menu → Staff sign in**, or go to `/admin.html`.
   Products already in the inventory are updated, matched by barcode or, without
   one, by name. It can generate barcodes for products that have none.
 - **Print label** — in the product form, makes a label image (name, barcode,
-  price) sized for a NIIMBOT B1 (50×30, 40×30, 40×20 or 30×20 mm). Share or
-  save it and print it from the NIIMBOT app.
+  price) sized for a NIIMBOT B1 (50×30, 40×30, 40×20 or 30×20 mm). **Print to
+  NIIMBOT** sends it straight to the printer over Bluetooth in Chrome on
+  Android or a computer (through the unofficial NiimBlueLib library); on any
+  device you can also share or save the image and print it from the NIIMBOT app.
 - **Profit** — each product has an **original price** (what it
   cost you) and a **market price** (what it sells for). The page shows expected
   profit, margin, and the stock valued at both prices. *Expected profit* is what
