@@ -92,37 +92,115 @@ async function sendMail(mail: Mail): Promise<{ ok: boolean; reason?: string }> {
   }
 }
 
+/** A button that shows in Outlook too: the colour sits on a table cell. */
+function emailButton(href: string, label: string, primary: boolean): string {
+  const bg = primary ? '#1f6feb' : '#ffffff';
+  const fg = primary ? '#ffffff' : '#1f6feb';
+  return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto">
+<tr><td align="center" bgcolor="${bg}" style="background:${bg};border:2px solid #1f6feb;border-radius:8px;padding:12px 26px">
+<a href="${escapeHtml(href)}" target="_blank" style="color:${fg};font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:bold;text-decoration:none;display:inline-block">${escapeHtml(label)}</a>
+</td></tr></table>`;
+}
+
 /** The sign-in email for a new account, or for a password set by a super admin. */
 function credentialsMail(kind: 'new' | 'reset', to: string, password: string, storeName: string, role: string, link: string, storeLink: string): Mail {
   const roleName = role === 'super_admin' ? 'Super admin' : 'Admin';
-  const opening = kind === 'new'
-    ? `An account has been created for you at ${storeName} (${roleName}).`
-    : `A super admin of ${storeName} has set a new password for your account.`;
-  const text = [
-    'Hello,', '', opening, '',
-    `Email: ${to}`, `Password: ${password}`, '',
-    ...(storeLink ? [`Open ${storeName}: ${storeLink}`] : []),
-    link ? `Back office sign in: ${link}` : 'Sign in through the store\'s back office.', '',
-    'Tip: open the store link on your phone and add it to your home screen.', '',
-    'For your security, sign in and change this password under Profile > Change my password.',
-    'If you were not expecting this email, you can ignore it or let the store know.',
-  ].join('\n');
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#141a21">
-<p>Hello,</p><p>${escapeHtml(opening)}</p>
-<table style="border-collapse:collapse;margin:12px 0">
-<tr><td style="padding:4px 12px 4px 0;color:#5a6472">Email</td><td style="padding:4px 0"><strong>${escapeHtml(to)}</strong></td></tr>
-<tr><td style="padding:4px 12px 4px 0;color:#5a6472">Password</td><td style="padding:4px 0"><strong style="font-family:Consolas,Menlo,monospace;font-size:16px">${escapeHtml(password)}</strong></td></tr>
+  const isNew = kind === 'new';
+  const heading = isNew ? `Welcome to ${storeName}` : 'Your password was changed';
+  const intro = isNew
+    ? `An account has been created for you at <strong>${escapeHtml(storeName)}</strong> as <strong>${roleName}</strong>. Here is everything you need to get started.`
+    : `A super admin of <strong>${escapeHtml(storeName)}</strong> has set a new password for your account. Your old password no longer works.`;
+  const preheader = isNew ? `Your sign-in details for ${storeName}` : `Your new password for ${storeName}`;
+  const signInAt = link || storeLink;
+  const shownEmail = escapeHtml(to);
+
+  const steps = [
+    storeLink ? `Tap <strong>Open ${escapeHtml(storeName)}</strong> above to open the store on your phone.` : '',
+    `Sign in with the email and password above${link ? ' (Menu &rsaquo; Staff sign in, or the back office link)' : ''}.`,
+    'Change your password under <strong>Profile &rsaquo; Change my password</strong>.',
+    storeLink && isNew ? 'Optional: add the store to your home screen so it opens like an app.' : '',
+  ].filter(Boolean);
+  const stepRows = steps.map((s, i) => `<tr>
+<td valign="top" style="padding:0 12px 12px 0;width:28px"><table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr><td align="center" bgcolor="#e8f0fe" style="background:#e8f0fe;border-radius:14px;width:28px;height:28px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;color:#1f6feb">${i + 1}</td></tr></table></td>
+<td valign="top" style="padding:4px 0 12px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#2b3440">${s}</td>
+</tr>`).join('');
+
+  const linkLine = (label: string, href: string) => `<p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:#5a6472">${label}: <a href="${escapeHtml(href)}" style="color:#1f6feb;word-break:break-all">${escapeHtml(href)}</a></p>`;
+
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light">
+<title>${escapeHtml(heading)}</title></head>
+<body style="margin:0;padding:0;background:#eef1f5">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#eef1f5">${escapeHtml(preheader)}</div>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef1f5" style="background:#eef1f5">
+<tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:560px">
+
+<tr><td bgcolor="#1f6feb" style="background:#1f6feb;border-radius:12px 12px 0 0;padding:26px 28px">
+<p style="margin:0 0 4px;font-family:Arial,Helvetica,sans-serif;font-size:13px;letter-spacing:1px;text-transform:uppercase;color:#d6e4ff">${escapeHtml(storeName)} &middot; Inventory</p>
+<h1 style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:24px;line-height:1.3;color:#ffffff">${escapeHtml(heading)}</h1>
+</td></tr>
+
+<tr><td bgcolor="#ffffff" style="background:#ffffff;padding:28px">
+<p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#2b3440">Hello,</p>
+<p style="margin:0 0 22px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#2b3440">${intro}</p>
+
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f5f7fa" style="background:#f5f7fa;border:1px solid #dfe4ea;border-radius:10px">
+<tr><td style="padding:18px 20px 6px;font-family:Arial,Helvetica,sans-serif;font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#5a6472">Your sign-in details</td></tr>
+<tr><td style="padding:6px 20px"><span style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5a6472">Email</span><br>
+<span style="font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:bold;color:#141a21">${shownEmail}</span></td></tr>
+<tr><td style="padding:10px 20px 18px"><span style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5a6472">${isNew ? 'Temporary password' : 'New password'}</span><br>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:6px"><tr><td bgcolor="#ffffff" style="background:#ffffff;border:1px dashed #9aa5b1;border-radius:6px;padding:8px 14px;font-family:Consolas,Menlo,'Courier New',monospace;font-size:20px;font-weight:bold;letter-spacing:2px;color:#141a21">${escapeHtml(password)}</td></tr></table>
+<span style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5a6472">Capital and small letters matter.</span></td></tr>
 </table>
-${storeLink ? `<p style="margin:16px 0 4px"><a href="${escapeHtml(storeLink)}" style="display:inline-block;background:#1f6feb;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:bold">Open ${escapeHtml(storeName)}</a></p>
-<p style="margin:0 0 12px;font-size:13px;color:#5a6472">Store link: <a href="${escapeHtml(storeLink)}" style="color:#1f6feb">${escapeHtml(storeLink)}</a></p>` : ''}
-${link ? `<p style="margin:12px 0 4px"><a href="${escapeHtml(link)}" style="display:inline-block;background:#ffffff;color:#1f6feb;border:1px solid #1f6feb;text-decoration:none;padding:9px 17px;border-radius:8px;font-weight:bold">Back office sign in</a></p>
-<p style="margin:0 0 12px;font-size:13px;color:#5a6472">Back office: <a href="${escapeHtml(link)}" style="color:#1f6feb">${escapeHtml(link)}</a></p>` : ''}
-<p style="color:#5a6472">Tip: open the store link on your phone and add it to your home screen.</p>
-<p style="color:#5a6472">For your security, sign in and change this password under <strong>Profile &gt; Change my password</strong>. If you were not expecting this email, you can ignore it or let the store know.</p>
-</div>`;
+
+${storeLink ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td align="center" style="padding:26px 0 10px">${emailButton(storeLink, `Open ${storeName}`, true)}</td></tr>` : '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">'}
+${link ? `<tr><td align="center" style="padding:${storeLink ? '4' : '26'}px 0 6px">${emailButton(link, 'Back office sign in', !storeLink)}</td></tr>` : ''}
+</table>
+
+<h2 style="margin:24px 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:17px;color:#141a21">${isNew ? 'Getting started' : 'What to do now'}</h2>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">${stepRows}</table>
+
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:8px"><tr><td style="border-top:1px solid #e3e7ec;padding-top:16px">
+<p style="margin:0 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5a6472">If a button doesn't work, copy these links into your browser:</p>
+${storeLink ? linkLine('Store', storeLink) : ''}${link ? linkLine('Back office', link) : ''}${!signInAt ? '<p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5a6472">Ask the store for the sign-in link.</p>' : ''}
+</td></tr></table>
+</td></tr>
+
+<tr><td bgcolor="#f5f7fa" style="background:#f5f7fa;border-radius:0 0 12px 12px;border-top:1px solid #e3e7ec;padding:18px 28px">
+<p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#5a6472"><strong>Keep this password private.</strong> The store will never ask you for it. Change it after your first sign-in, then delete this email.</p>
+<p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#5a6472">Not expecting this? You can ignore this email or let ${escapeHtml(storeName)} know.</p>
+</td></tr>
+
+</table>
+</td></tr></table>
+</body></html>`;
+
+  const text = [
+    heading, '',
+    'Hello,', '',
+    isNew
+      ? `An account has been created for you at ${storeName} as ${roleName}.`
+      : `A super admin of ${storeName} has set a new password for your account. Your old password no longer works.`,
+    '',
+    'YOUR SIGN-IN DETAILS',
+    `Email: ${to}`,
+    `${isNew ? 'Temporary password' : 'New password'}: ${password}`,
+    '(Capital and small letters matter.)', '',
+    ...(storeLink ? [`Open ${storeName}: ${storeLink}`] : []),
+    ...(link ? [`Back office sign in: ${link}`] : []),
+    '',
+    isNew ? 'GETTING STARTED' : 'WHAT TO DO NOW',
+    ...steps.map((s, i) => `${i + 1}. ${s.replace(/<[^>]+>/g, '').replace(/&rsaquo;/g, '>')}`),
+    '',
+    'Keep this password private. The store will never ask you for it. Change it after your first sign-in, then delete this email.',
+    `Not expecting this? You can ignore this email or let ${storeName} know.`,
+  ].join('\n');
+
   return {
     to, text, html, fromName: `${storeName} Inventory`,
-    subject: kind === 'new' ? `Your account for ${storeName}` : `Your new password for ${storeName}`,
+    subject: isNew ? `Welcome to ${storeName}: your sign-in details` : `Your new password for ${storeName}`,
   };
 }
 
