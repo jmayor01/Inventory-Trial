@@ -1142,6 +1142,12 @@ async function applySession(session) {
   sessionSeen = true;
   sessionUserId = id;
 
+  // Still on a temporary password: the back office asks for their own first.
+  if (user && user.app_metadata && user.app_metadata.must_change_password) {
+    location.replace('admin.html' + location.search);
+    return;
+  }
+
   if (id) {
     let stores = null;
     try {

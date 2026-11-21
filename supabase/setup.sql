@@ -792,3 +792,52 @@ insert into public.store_members (store_id, user_id, role)
 select public.default_store_id(), p.user_id, 'super_admin' from public.profiles p
  where not exists (select 1 from public.store_members)
    and (select count(*) from auth.users) = 1;
+
+-- Sales alerts -----------------------------------------------------------------
+-- When a sale is edited or cancelled, the database itself queues an email to
+-- the store's super admins, so the alert goes out however the change was made.
+-- The row is queued in notify_outbox and the manage-users function is asked
+-- (through pg_net, after the change is saved) to send it. Only that function,
+-- with the secret key, reads the table.
+
+create extension if not exists pg_net with schema extensions;
+
+create table if not exists public.notify_outbox (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null,
+  store_id uuid not null references public.stores (id) on delete cascade,
+  payload jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  sent_at timestamptz,
+  result text
+);
+alter table public.notify_outbox enable row level security;
+revoke all on public.notify_outbox from anon, authenticated;
+
+create or replace function public.queue_sale_alert()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare
+  v_kind text;
+  v_id uuid;
+begin
+  if new.voided_at is not null and old.voided_at is null then
+    v_kind := 'sale_voided';
+  elsif new.edited_at is distinct from old.edited_at and new.voided_at is null then
+    v_kind := 'sale_edited';
+  else
+    return new;
+  end if;
+  insert into public.notify_outbox (kind, store_id, payload)
+  values (v_kind, new.store_id, jsonb_build_object('sale_id', new.id, 'old_total', old.total, 'new_total', new.total))
+  returning id into v_id;
+  -- Sent only if the change is saved; a failed request leaves the row unsent.
+  perform net.http_post(
+    url := 'https://ydfihqnfugzbcydvksvl.supabase.co/functions/v1/manage-users',
+    body := jsonb_build_object('action', 'outbox', 'id', v_id),
+    headers := '{"Content-Type": "application/json"}'::jsonb);
+  return new;
+end $$;
+revoke all on function public.queue_sale_alert() from public, anon, authenticated;
+
+create or replace trigger sales_alert after update of voided_at, edited_at on public.sales
+  for each row execute function public.queue_sale_alert();

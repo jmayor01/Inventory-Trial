@@ -124,7 +124,15 @@ Open **Menu → Staff sign in**, or go to `/admin.html`.
   and one is made up. The new account's email and password (or the new
   password after a reset) are emailed to the person with a link to sign in;
   if the email can't be sent, the password is shown once so you can pass it on.
-  Ask people to change it in **Profile** after their first sign-in.
+  That password is temporary: at their first sign-in they must choose their
+  own. Until they do, the list shows **Has not signed in yet** (or **Has not
+  chosen their own password yet**) and a **Resend welcome email** button.
+- **Forgot password?** — on the sign-in screen. It emails a link that works
+  once, for 1 hour, to choose a new password. It answers the same whether or
+  not the account exists, and sends at most 3 links per address in 15 minutes.
+- **Sales alerts** — when a sale is edited or cancelled, every super admin of
+  that store gets an email with who did it, the totals before and after, and
+  the items. The database sends it, so it goes out however the change was made.
 - **Passcodes** — create and delete the codes for people without an account:
   *view only*, or *cashier*, which can also record sales. Give each cashier
   their own so their sales can be told apart.
@@ -165,6 +173,11 @@ viewing; it is removed on sign-out or when the passcode is forgotten.
      `Inventory <no-reply@yourdomain.com>`, on a domain verified in Resend).
 
    Without them, accounts are still created and the password is shown to you.
+5. **Supabase's own emails.** Under **Authentication → Emails → SMTP
+   Settings**, enter the same Gmail (host `smtp.gmail.com`, port `465`, the
+   Gmail address and app password). Then under **Authentication → Emails**,
+   turn on the **Password changed** security notification, so everyone is
+   told when their password changes.
 
 To use a different Supabase project, change the two values in `config.js` (the
 *publishable* key only — never a secret key) and repeat the steps above.

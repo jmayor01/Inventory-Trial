@@ -39,6 +39,36 @@
       <p class="hint">Leave it off on a shared device: you are then signed out when the browser or app is closed.</p>
       <p id="loginError" class="error" role="alert" hidden></p>
       <button id="loginBtn" type="submit" class="btn primary">Sign in</button>
+      <p class="login-alt"><button id="forgotLink" type="button" class="linklike">Forgot password?</button></p>
+    </form>
+  </section>
+
+  <section id="forgotView" class="login" aria-labelledby="forgotTitle">
+    <form id="forgotForm" novalidate>
+      <h2 id="forgotTitle" tabindex="-1">Forgot your password?</h2>
+      <p class="hint">Enter the email you sign in with. We'll email you a link to choose a new password. The link works once, for 1 hour.</p>
+      <label for="fEmail">Email</label>
+      <input id="fEmail" type="email" autocomplete="username" autocapitalize="off" required>
+      <p id="forgotError" class="error" role="alert" hidden></p>
+      <p id="forgotDone" class="notice" role="status" hidden></p>
+      <button id="forgotBtn" type="submit" class="btn primary">Email me a link</button>
+      <p class="login-alt"><button id="forgotBack" type="button" class="linklike">Back to sign in</button></p>
+    </form>
+  </section>
+
+  <section id="newPassView" class="login" aria-labelledby="newPassTitle">
+    <form id="newPassForm" novalidate>
+      <h2 id="newPassTitle" tabindex="-1">Choose your password</h2>
+      <p id="newPassHint" class="hint"></p>
+      <input type="email" id="npEmail" autocomplete="username" hidden readonly>
+      <label for="npNew">New password</label>
+      <input id="npNew" type="password" autocomplete="new-password" minlength="8" required aria-describedby="npRule">
+      <p id="npRule" class="hint">At least 8 characters.</p>
+      <label for="npNew2">Type it again</label>
+      <input id="npNew2" type="password" autocomplete="new-password" minlength="8" required>
+      <p id="newPassError" class="error" role="alert" hidden></p>
+      <button id="newPassBtn" type="submit" class="btn primary">Save my password</button>
+      <p class="login-alt"><button id="newPassSignOut" type="button" class="linklike">Sign out</button></p>
     </form>
   </section>
 

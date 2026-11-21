@@ -393,7 +393,15 @@ body.admin:not([data-view="app"]) main,
 body.admin[data-view="boot"] #signOutBtn,
 body.admin[data-view="login"] #signOutBtn,
 body.admin:not([data-view="login"]) #loginView,
-body.admin:not([data-view="norole"]) #noRoleView { display: none; }
+body.admin:not([data-view="norole"]) #noRoleView,
+body.admin:not([data-view="forgot"]) #forgotView,
+body.admin:not([data-view="newpass"]) #newPassView,
+body.admin[data-view="forgot"] #signOutBtn,
+body.admin[data-view="newpass"] #signOutBtn { display: none; }
+.login-alt { text-align: center; margin-top: 14px; }
+.linklike { background: none; border: 0; padding: 6px; font: inherit; color: var(--primary); text-decoration: underline; cursor: pointer; }
+.notice { background: var(--primary-soft); color: var(--text); border-radius: 8px; padding: 10px 12px; margin-top: 12px; }
+.badge-wait { display: inline-block; font-size: .8rem; padding: 2px 8px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); margin-top: 4px; }
 /* Parts only the super admin sees. */
 body.admin:not([data-role="super_admin"]) [data-role="super_admin"] { display: none !important; }
 

@@ -1154,7 +1154,12 @@ const ROLE_NAMES = { admin: 'Admin', super_admin: 'Super admin' };
 /** Calls the manage-users server function, which holds the key needed to create accounts. */
 async function manageUsers(body) {
   const appUrl = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}admin.html?store=${encodeURIComponent(store.slug)}`;
-  const { data, error } = await sb.functions.invoke('manage-users', { body: { ...body, store_id: store.id, app_url: appUrl, store_url: storeLink(store.slug) } });
+  return callAccountService({ ...body, store_id: store.id, app_url: appUrl, store_url: storeLink(store.slug) });
+}
+
+/** Calls the manage-users function; throws with its message when it refuses. */
+async function callAccountService(body) {
+  const { data, error } = await sb.functions.invoke('manage-users', { body });
   if (!error) return data;
   let message = '';
   try {
@@ -1165,9 +1170,12 @@ async function manageUsers(body) {
 
 async function loadUsers() {
   const forStore = store.id;
+  // Who has not signed in or chosen their own password yet (best effort).
+  const statusesAsked = manageUsers({ action: 'statuses' }).then((r) => (r && r.statuses) || {}, () => ({}));
   const { data: rows, error } = await sb.from('store_members')
     .select('user_id, role, created_at, profiles(email, account_code, display_name)')
     .eq('store_id', forStore).order('created_at');
+  const statuses = await statusesAsked;
   if (forStore !== store.id) return;
   if (error) { setStatus(explain(error, 'Could not load the users.')); return; }
   const data = rows.map((r) => ({ user_id: r.user_id, role: r.role, email: (r.profiles && r.profiles.email) || '', code: (r.profiles && r.profiles.account_code) || '', name: (r.profiles && r.profiles.display_name) || '' }));
@@ -1179,6 +1187,10 @@ async function loadUsers() {
     const main = el('div', 'row-main');
     main.append(el('div', 'row-title', u.name ? `${u.name} (${u.email})` : u.email || '(no email)'), el('div', 'hint', `${mine ? `${ROLE_NAMES[u.role]} · you` : ROLE_NAMES[u.role]}${u.code ? ` · ID ${showAccountId(u.code)}` : ''}`));
     li.append(main);
+    const status = statuses[u.user_id];
+    if (status && status.must_change) {
+      main.append(el('span', 'badge-wait', status.signed_in ? 'Has not chosen their own password yet' : 'Has not signed in yet'));
+    }
     // Anyone who forgot their password gets a new one here, the super admin included.
     const reset = el('button', 'btn', mine ? 'My profile' : 'Reset password');
     reset.type = 'button';
@@ -1226,6 +1238,27 @@ async function loadUsers() {
         loadUsers();
       });
       actions.append(select, reset, remove);
+      if (status && status.must_change) {
+        const resend = el('button', 'btn', 'Resend welcome email');
+        resend.type = 'button';
+        resend.setAttribute('aria-label', `Resend the welcome email to ${u.email}`);
+        resend.addEventListener('click', async () => {
+          const yes = await confirmDialog({
+            title: `Send ${u.email} a new welcome email?`,
+            text: 'They get a new temporary password by email; the one sent before stops working.',
+            ok: 'Send',
+          });
+          if (!yes) return;
+          resend.disabled = true;
+          try {
+            showCredentials('Welcome email sent again', u.email, await manageUsers({ action: 'resend', user_id: u.user_id }));
+          } catch (e) {
+            toast(e.message);
+          }
+          loadUsers();
+        });
+        actions.prepend(resend);
+      }
       li.append(actions);
     }
     list.append(li);
@@ -1605,6 +1638,99 @@ $('profPasswordForm').addEventListener('submit', async (e) => {
   }
 });
 
+// ---------- Forgot password / choose a password ----------
+
+let recovering = false; // signed in through a reset link, so a new password comes first
+
+function showView(view, focusId) {
+  document.body.dataset.view = view;
+  if (focusId) setTimeout(() => $(focusId).focus(), 0);
+}
+
+$('forgotLink').addEventListener('click', () => {
+  $('fEmail').value = $('lEmail').value.trim();
+  showError('forgotError', '');
+  $('forgotDone').hidden = true;
+  showView('forgot', 'forgotTitle');
+});
+$('forgotBack').addEventListener('click', () => showView('login', 'lEmail'));
+
+$('forgotForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = $('fEmail').value.trim();
+  showError('forgotError', '');
+  $('forgotDone').hidden = true;
+  if (!/^\S+@\S+\.\S+$/.test(email)) { showError('forgotError', 'Enter the email address you sign in with.'); $('fEmail').focus(); return; }
+  $('forgotBtn').disabled = true;
+  try {
+    await callAccountService({ action: 'forgot', email, origin: location.origin });
+    // The same answer whether or not the account exists.
+    $('forgotDone').textContent = `If ${email} has an account, a link to choose a new password is on its way. Check your inbox and Spam folder; it works for 1 hour.`;
+    $('forgotDone').hidden = false;
+  } catch (err) {
+    showError('forgotError', err.message);
+  } finally {
+    $('forgotBtn').disabled = false;
+  }
+});
+
+/** Shows "Choose your password", after a reset link or a first sign-in. */
+function showNewPassword(user) {
+  $('newPassForm').reset();
+  showError('newPassError', '');
+  $('npEmail').value = user.email || '';
+  $('newPassTitle').textContent = recovering ? 'Choose a new password' : 'Choose your own password';
+  $('newPassHint').textContent = recovering
+    ? `Set a new password for ${user.email}. After saving, you are signed in.`
+    : `Welcome! You signed in with a temporary password. Choose your own password for ${user.email} to continue.`;
+  showView('newpass', 'npNew');
+}
+
+$('newPassForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const next = $('npNew').value;
+  showError('newPassError', '');
+  if (next.length < 8) { showError('newPassError', 'The password needs at least 8 characters.'); $('npNew').focus(); return; }
+  if (next !== $('npNew2').value) { showError('newPassError', 'The two passwords are not the same.'); $('npNew2').focus(); return; }
+  $('newPassBtn').disabled = true;
+  try {
+    const { error } = await sb.auth.updateUser({ password: next });
+    if (error) {
+      showError('newPassError', error.code === 'same_password' ? 'Choose a password different from the temporary one.' : explain(error, 'Could not save your password.'));
+      return;
+    }
+    // Clears "must choose a password" on the account, then carries on as normal.
+    try { await callAccountService({ action: 'password_changed' }); } catch { /* asked again next time; harmless */ }
+    recovering = false;
+    const { data } = await sb.auth.refreshSession();
+    sessionApplied = false;
+    toast('Password saved');
+    await applySession(data.session);
+  } finally {
+    $('newPassBtn').disabled = false;
+  }
+});
+$('newPassSignOut').addEventListener('click', () => { recovering = false; sb.auth.signOut({ scope: 'local' }); });
+
+// A reset link opens admin.html#reset=<token>: trade it for a session.
+(function useResetLink() {
+  const token = (location.hash.match(/^#reset=([^&]+)/) || [])[1];
+  if (!token) return;
+  history.replaceState(null, '', location.pathname + location.search); // the token works once; keep it out of history
+  recovering = true;
+  document.body.dataset.view = 'boot';
+  sb.auth.verifyOtp({ token_hash: decodeURIComponent(token), type: 'recovery' }).then(async ({ data, error }) => {
+    if (error || !data.session) {
+      recovering = false;
+      showView('login', 'lEmail');
+      showError('loginError', 'This reset link has expired or was already used. Tap "Forgot password?" to get a new one.');
+      return;
+    }
+    sessionApplied = false;
+    await applySession(data.session);
+  });
+})();
+
 // ---------- Sign in / out ----------
 
 const signOut = () => sb.auth.signOut({ scope: 'local' });
@@ -1628,8 +1754,13 @@ async function applySession(session) {
   for (const d of document.querySelectorAll('dialog[open]')) d.close();
   delete document.body.dataset.role;
   if (!id) {
-    document.body.dataset.view = 'login';
+    document.body.dataset.view = recovering ? 'boot' : (document.body.dataset.view === 'forgot' ? 'forgot' : 'login');
     render();
+    return;
+  }
+  // A reset link, or a temporary password: they choose their own before anything else.
+  if (recovering || (user.app_metadata && user.app_metadata.must_change_password)) {
+    showNewPassword(user);
     return;
   }
 
