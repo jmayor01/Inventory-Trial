@@ -1154,7 +1154,7 @@ const ROLE_NAMES = { admin: 'Admin', super_admin: 'Super admin' };
 /** Calls the manage-users server function, which holds the key needed to create accounts. */
 async function manageUsers(body) {
   const appUrl = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}admin.html?store=${encodeURIComponent(store.slug)}`;
-  const { data, error } = await sb.functions.invoke('manage-users', { body: { ...body, store_id: store.id, app_url: appUrl } });
+  const { data, error } = await sb.functions.invoke('manage-users', { body: { ...body, store_id: store.id, app_url: appUrl, store_url: storeLink(store.slug) } });
   if (!error) return data;
   let message = '';
   try {

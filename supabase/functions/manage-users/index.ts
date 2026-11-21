@@ -93,15 +93,17 @@ async function sendMail(mail: Mail): Promise<{ ok: boolean; reason?: string }> {
 }
 
 /** The sign-in email for a new account, or for a password set by a super admin. */
-function credentialsMail(kind: 'new' | 'reset', to: string, password: string, storeName: string, role: string, link: string): Mail {
+function credentialsMail(kind: 'new' | 'reset', to: string, password: string, storeName: string, role: string, link: string, storeLink: string): Mail {
   const roleName = role === 'super_admin' ? 'Super admin' : 'Admin';
   const opening = kind === 'new'
     ? `An account has been created for you at ${storeName} (${roleName}).`
     : `A super admin of ${storeName} has set a new password for your account.`;
   const text = [
     'Hello,', '', opening, '',
-    link ? `Sign in here: ${link}` : 'Sign in through the store\'s back office.',
     `Email: ${to}`, `Password: ${password}`, '',
+    ...(storeLink ? [`Open ${storeName}: ${storeLink}`] : []),
+    link ? `Back office sign in: ${link}` : 'Sign in through the store\'s back office.', '',
+    'Tip: open the store link on your phone and add it to your home screen.', '',
     'For your security, sign in and change this password under Profile > Change my password.',
     'If you were not expecting this email, you can ignore it or let the store know.',
   ].join('\n');
@@ -111,7 +113,11 @@ function credentialsMail(kind: 'new' | 'reset', to: string, password: string, st
 <tr><td style="padding:4px 12px 4px 0;color:#5a6472">Email</td><td style="padding:4px 0"><strong>${escapeHtml(to)}</strong></td></tr>
 <tr><td style="padding:4px 12px 4px 0;color:#5a6472">Password</td><td style="padding:4px 0"><strong style="font-family:Consolas,Menlo,monospace;font-size:16px">${escapeHtml(password)}</strong></td></tr>
 </table>
-${link ? `<p><a href="${escapeHtml(link)}" style="display:inline-block;background:#1f6feb;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:bold">Sign in</a></p>` : ''}
+${storeLink ? `<p style="margin:16px 0 4px"><a href="${escapeHtml(storeLink)}" style="display:inline-block;background:#1f6feb;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:bold">Open ${escapeHtml(storeName)}</a></p>
+<p style="margin:0 0 12px;font-size:13px;color:#5a6472">Store link: <a href="${escapeHtml(storeLink)}" style="color:#1f6feb">${escapeHtml(storeLink)}</a></p>` : ''}
+${link ? `<p style="margin:12px 0 4px"><a href="${escapeHtml(link)}" style="display:inline-block;background:#ffffff;color:#1f6feb;border:1px solid #1f6feb;text-decoration:none;padding:9px 17px;border-radius:8px;font-weight:bold">Back office sign in</a></p>
+<p style="margin:0 0 12px;font-size:13px;color:#5a6472">Back office: <a href="${escapeHtml(link)}" style="color:#1f6feb">${escapeHtml(link)}</a></p>` : ''}
+<p style="color:#5a6472">Tip: open the store link on your phone and add it to your home screen.</p>
 <p style="color:#5a6472">For your security, sign in and change this password under <strong>Profile &gt; Change my password</strong>. If you were not expecting this email, you can ignore it or let the store know.</p>
 </div>`;
   return {
@@ -154,7 +160,9 @@ Deno.serve(async (req) => {
   const storeName = storeRow?.name ?? 'the store';
   // Where to sign in, as given by the back office; only plain web addresses.
   const appUrl = String(body.app_url ?? '');
-  const link = /^https?:\/\/[^\s"'<>]{1,300}$/.test(appUrl) ? appUrl : '';
+  const okUrl = (u: string) => (/^https?:\/\/[^\s"'<>]{1,300}$/.test(u) ? u : '');
+  const link = okUrl(appUrl);
+  const storeLink = okUrl(String(body.store_url ?? ''));
 
   /** The stores an account belongs to. */
   const storesOf = async (userId: string): Promise<string[]> => {
@@ -223,7 +231,7 @@ Deno.serve(async (req) => {
       await admin.auth.admin.deleteUser(userId); // do not leave an account that cannot get in
       return json(500, { error: 'Could not set up the account, so it was not created.' });
     }
-    const mail = await sendMail(credentialsMail('new', email, newPassword, storeName, role, link));
+    const mail = await sendMail(credentialsMail('new', email, newPassword, storeName, role, link, storeLink));
     return json(200, {
       user: { user_id: userId, email, role }, existing: false,
       emailed: mail.ok, email_problem: mail.reason ?? null,
@@ -264,7 +272,7 @@ Deno.serve(async (req) => {
     if (target) await admin.from('attempt_counters').update({ failed: 0 }).eq('kind', 'login').eq('who', String(target.email).toLowerCase());
     const { data: theirs } = await admin.from('store_members').select('role').eq('store_id', storeId).eq('user_id', userId).maybeSingle();
     const mail = target
-      ? await sendMail(credentialsMail('reset', String(target.email), password, storeName, theirs?.role ?? 'admin', link))
+      ? await sendMail(credentialsMail('reset', String(target.email), password, storeName, theirs?.role ?? 'admin', link, storeLink))
       : { ok: false, reason: 'they have no email address on file' };
     return json(200, { ok: true, emailed: mail.ok, email_problem: mail.reason ?? null, password: generated || !mail.ok ? password : null });
   }
