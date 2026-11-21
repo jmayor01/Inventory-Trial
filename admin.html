@@ -22,7 +22,7 @@
       <h1>Back office</h1>
     </div>
     <div class="topbar-links">
-      <a class="btn ghost" href="./">Inventory</a>
+      <a id="inventoryLink" class="btn ghost" href="./">Inventory</a>
       <button id="signOutBtn" type="button" class="btn ghost">Sign out</button>
     </div>
   </header>
@@ -49,12 +49,21 @@
   </section>
 
   <main>
-    <p class="hint whoami">Signed in as <strong id="whoEmail"></strong> · <span id="whoRole"></span></p>
+    <div class="store-bar">
+      <div class="store-current">
+        <span class="store-label">Store</span>
+        <strong id="storeTitle"></strong>
+        <label class="sr-only" for="storeSwitch">Switch store</label>
+        <select id="storeSwitch" hidden></select>
+      </div>
+      <p class="hint whoami">Signed in as <strong id="whoEmail"></strong> · <span id="whoRole"></span></p>
+    </div>
     <div class="tabs" role="tablist" aria-label="Back office sections">
       <button type="button" class="tab" role="tab" data-tab="products" aria-selected="true">Products</button>
       <button type="button" class="tab" role="tab" data-tab="sales" aria-selected="false">Sales</button>
       <button type="button" class="tab" role="tab" data-tab="users" aria-selected="false" data-role="super_admin">Users</button>
       <button type="button" class="tab" role="tab" data-tab="codes" aria-selected="false">Passcodes</button>
+      <button type="button" class="tab" role="tab" data-tab="store" aria-selected="false">Store</button>
     </div>
     <p id="status" class="status" role="status" hidden></p>
 
@@ -127,27 +136,28 @@
 
     <div id="tab-users" class="tabpanel" hidden>
       <h2 class="section-title">Users</h2>
-      <p class="hint">An <strong>admin</strong> can do everything in the back office except manage user accounts. Only a <strong>super admin</strong> can add users, change roles, reset passwords and remove accounts.</p>
+      <p class="hint">The people who work at <strong class="store-name-here"></strong>. An <strong>admin</strong> can do everything in this store's back office except manage its users. A <strong>super admin</strong> can also add users, change roles, reset passwords and remove people from the store.</p>
       <ul id="userList" class="list plain"></ul>
       <form id="userForm" class="card-form" novalidate>
-        <h3>Add a user</h3>
+        <h3>Add someone to this store</h3>
         <label for="uEmail">Email</label>
         <input id="uEmail" type="email" autocomplete="off" autocapitalize="off" required>
-        <label for="uPassword">Password <span class="optional">at least 8 characters</span></label>
-        <input id="uPassword" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" minlength="8" required>
+        <label for="uPassword">Password <span class="optional">for a new account, at least 8 characters</span></label>
+        <input id="uPassword" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" minlength="8">
+        <p class="hint">Someone who already has an account at another store is added as they are: leave the password empty, they keep their own.</p>
         <label for="uRole">Role</label>
         <select id="uRole">
           <option value="admin">Admin</option>
           <option value="super_admin">Super admin</option>
         </select>
         <p id="userError" class="error" role="alert" hidden></p>
-        <button id="userSave" type="submit" class="btn primary">Create user</button>
+        <button id="userSave" type="submit" class="btn primary">Add to store</button>
       </form>
     </div>
 
     <div id="tab-codes" class="tabpanel" hidden>
       <h2 class="section-title">Passcodes</h2>
-      <p class="hint">Without a passcode, someone who opens the app link can only look up one product at a time by its barcode. A <strong>view-only</strong> passcode shows the whole list of items. A <strong>cashier</strong> passcode can also sell: it takes items out of stock through a recorded sale. Give each cashier their own passcode so you can tell their sales apart. Delete a passcode to stop it working.</p>
+      <p class="hint">These passcodes open <strong class="store-name-here"></strong> only. Without a passcode, someone who opens the store's link can only look up one product at a time by its barcode. A <strong>view-only</strong> passcode shows the whole list of items. A <strong>cashier</strong> passcode can also sell: it takes items out of stock through a recorded sale. Give each cashier their own passcode so you can tell their sales apart. Delete a passcode to stop it working.</p>
       <ul id="codeList" class="list plain"></ul>
       <form id="codeForm" class="card-form" novalidate>
         <h3>Create a passcode</h3>
@@ -165,6 +175,34 @@
         <input id="cLabel" autocomplete="off" maxlength="80" placeholder="e.g. the cashier's name">
         <p id="codeError" class="error" role="alert" hidden></p>
         <button id="codeSave" type="submit" class="btn primary">Create passcode</button>
+      </form>
+    </div>
+    <div id="tab-store" class="tabpanel" hidden>
+      <h2 class="section-title">Store</h2>
+      <section class="card-form">
+        <h3>Public link</h3>
+        <p class="hint">Give this link to customers and cashiers. Barcode lookups and passcodes on it only reach this store.</p>
+        <div class="inline">
+          <input id="storeLinkText" readonly aria-label="Public link of this store">
+          <button type="button" id="storeLinkCopy" class="btn">Copy</button>
+        </div>
+      </section>
+      <form id="storeRenameForm" class="card-form" novalidate data-role="super_admin">
+        <h3>Store name</h3>
+        <label for="storeNameInput">Name</label>
+        <input id="storeNameInput" maxlength="80" autocomplete="off" required>
+        <p id="storeRenameError" class="error" role="alert" hidden></p>
+        <button type="submit" id="storeRenameSave" class="btn primary">Save name</button>
+      </form>
+      <form id="storeCreateForm" class="card-form" novalidate data-role="super_admin">
+        <h3>Add another store</h3>
+        <p class="hint">A new store starts empty: its own products, sales, passcodes and people. You become its super admin and can add people to it.</p>
+        <label for="newStoreName">Store name</label>
+        <input id="newStoreName" maxlength="80" autocomplete="off" placeholder="e.g. Market Branch" required>
+        <label for="newStoreSlug">Short name for its link <span class="optional">lower-case letters, numbers, dashes</span></label>
+        <input id="newStoreSlug" maxlength="30" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. market" required>
+        <p id="newStoreError" class="error" role="alert" hidden></p>
+        <button type="submit" id="newStoreSave" class="btn primary">Create store</button>
       </form>
     </div>
   </main>

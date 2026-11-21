@@ -10,6 +10,46 @@
 
 const $ = (id) => document.getElementById(id);
 
+// ---------- Stores ----------
+// Everything belongs to one store. The store in use comes from the link
+// (?store=short-name), else the one used last on this device, else the first.
+
+const STORE_KEY = 'inventory.store';
+
+const storeFromLink = () => (new URLSearchParams(location.search).get('store') || '').trim().toLowerCase();
+
+function rememberStore(slug) {
+  try { localStorage.setItem(STORE_KEY, slug); } catch { /* not remembered */ }
+}
+
+function rememberedStore() {
+  try { return localStorage.getItem(STORE_KEY) || ''; } catch { return ''; }
+}
+
+/** Puts ?store= in the address bar, so the page can be bookmarked or shared as it is. */
+function showStoreInLink(slug) {
+  const url = new URL(location.href);
+  if (slug) url.searchParams.set('store', slug); else url.searchParams.delete('store');
+  history.replaceState(null, '', url);
+}
+
+/** The stores the signed-in account works at: [{ id, name, slug, role }], by name. */
+async function loadMyStores(userId) {
+  const { data, error } = await sb.from('store_members').select('role, stores(id, name, slug)').eq('user_id', userId);
+  if (error) throw error;
+  return data.filter((m) => m.stores).map((m) => ({ ...m.stores, role: m.role }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Which of my stores to open: the one in the link, the last one used, or the first. */
+function chooseStore(stores) {
+  const wanted = storeFromLink() || rememberedStore();
+  return stores.find((s) => s.slug === wanted) || stores[0] || null;
+}
+
+/** The public address of a store's inventory app. */
+const storeLink = (slug) => `${location.origin}${location.pathname.replace(/[^/]*$/, '')}?store=${encodeURIComponent(slug)}`;
+
 // ---------- Where the sign-in is kept ----------
 // "Remember me" keeps the sign-in on this device until the user signs out.
 // Without it the sign-in lasts only until the browser (or the installed app)

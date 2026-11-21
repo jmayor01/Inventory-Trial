@@ -2,13 +2,18 @@
 -- Paste this whole file into Supabase > SQL Editor and press Run.
 -- It is safe to run more than once.
 --
--- Who can do what (enforced here, not just in the app):
---   Nobody signed in  -> look up one item by its exact barcode
---   With a passcode   -> also view the whole list of items
+-- Stores: every product, sale and passcode belongs to one store, and nothing
+-- from one store is visible from another. An account can belong to several
+-- stores, with a role in each.
+--
+-- Who can do what in a store (enforced here, not just in the app):
+--   Nobody signed in  -> look up one item by its exact barcode (via the store's link)
+--   With a passcode   -> also view that store's whole list of items
 --   Cashier passcode  -> also sell: take items out of stock through a recorded sale
 --   Admin             -> add, change and delete items, change stock, import,
---                        original prices and profit, passcodes
---   Super admin       -> everything an admin can, plus user accounts
+--                        original prices and profit, sales, passcodes
+--   Super admin       -> everything an admin can, plus the store's user accounts
+--                        and creating more stores
 
 -- Items -----------------------------------------------------------------------
 
@@ -22,10 +27,6 @@ create table if not exists public.items (
   photo_updated_at timestamptz,
   updated_at timestamptz not null default now()
 );
-
--- A barcode can belong to only one item (items without a barcode are fine).
-create unique index if not exists items_barcode_unique
-  on public.items (barcode) where barcode <> '';
 
 create or replace function public.items_touch_updated_at()
 returns trigger language plpgsql set search_path = '' as $$
@@ -55,31 +56,79 @@ create table if not exists public.item_costs (
 
 -- Roles -------------------------------------------------------------------------
 
--- One row per account that may use the back office. Accounts themselves are
--- Supabase Auth users; the manage-users Edge Function creates both together.
+-- One row per back-office account, holding its email address so that a super
+-- admin can see who is who. Accounts themselves are Supabase Auth users; the
+-- manage-users Edge Function creates both together. (The role column is from
+-- before stores existed; roles now live in store_members.)
 create table if not exists public.profiles (
   user_id uuid primary key references auth.users (id) on delete cascade,
   email text not null default '',
-  role text not null check (role in ('admin', 'super_admin')),
+  role text check (role in ('admin', 'super_admin')),
+  created_at timestamptz not null default now()
+);
+alter table public.profiles alter column role drop not null;
+
+create table if not exists public.stores (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (length(trim(name)) between 1 and 80),
+  -- The short name in the store's link, e.g. ...vercel.app/?store=main
+  slug text not null unique check (slug ~ '^[a-z0-9][a-z0-9-]{1,29}$'),
   created_at timestamptz not null default now()
 );
 
--- The role of whoever is making the request (null when not signed in or when
--- the account has no role). Security definer so policies can call it without
--- reading profiles through its own policies.
-create or replace function public.my_role()
+-- Who works at which store, and as what. One account can be in several stores.
+create table if not exists public.store_members (
+  store_id uuid not null references public.stores (id) on delete cascade,
+  user_id uuid not null references public.profiles (user_id) on delete cascade,
+  role text not null check (role in ('admin', 'super_admin')),
+  created_at timestamptz not null default now(),
+  primary key (store_id, user_id)
+);
+create index if not exists store_members_user on public.store_members (user_id);
+
+-- The first store holds everything from before stores existed. It is also the
+-- store a link without ?store= opens.
+insert into public.stores (name, slug)
+select 'Main store', 'main' where not exists (select 1 from public.stores);
+
+create or replace function public.default_store_id()
+returns uuid language sql stable security definer set search_path = '' as $$
+  select id from public.stores order by created_at, id limit 1;
+$$;
+
+-- Roles from before stores existed become roles in the first store (once:
+-- the old column is cleared afterwards, so nobody removed later is re-added).
+insert into public.store_members (store_id, user_id, role)
+select public.default_store_id(), user_id, role from public.profiles where role is not null
+on conflict (store_id, user_id) do nothing;
+update public.profiles set role = null where role is not null;
+
+-- The caller's role in a store: null when not signed in or not a member.
+-- Security definer so policies can call it without going through the
+-- store_members policies.
+create or replace function public.store_role(p_store uuid)
 returns text language sql stable security definer set search_path = '' as $$
-  select role from public.profiles where user_id = (select auth.uid());
+  select role from public.store_members where store_id = p_store and user_id = (select auth.uid());
 $$;
 
-create or replace function public.is_staff()
+create or replace function public.is_store_member(p_store uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
-  select coalesce(public.my_role() in ('admin', 'super_admin'), false);
+  select public.store_role(p_store) is not null;
 $$;
 
-create or replace function public.is_super_admin()
+create or replace function public.is_store_super_admin(p_store uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
-  select coalesce(public.my_role() = 'super_admin', false);
+  select coalesce(public.store_role(p_store) = 'super_admin', false);
+$$;
+
+-- Whether the caller may see someone's email: their own, or anyone in a store
+-- where the caller is a super admin.
+create or replace function public.can_see_profile(p_user uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select p_user = (select auth.uid()) or exists (
+    select 1 from public.store_members them
+      join public.store_members me on me.store_id = them.store_id
+     where them.user_id = p_user and me.user_id = (select auth.uid()) and me.role = 'super_admin');
 $$;
 
 -- Passcodes that let someone without an account view the list of items.
@@ -127,68 +176,161 @@ create table if not exists public.sale_lines (
 alter table public.sale_lines add column if not exists list_price numeric(12, 2);
 create index if not exists sale_lines_sale_id on public.sale_lines (sale_id);
 
+-- Which store each product, sale and passcode belongs to ----------------------------
+
+alter table public.items add column if not exists store_id uuid references public.stores (id) on delete cascade;
+alter table public.sales add column if not exists store_id uuid references public.stores (id) on delete cascade;
+alter table public.access_codes add column if not exists store_id uuid references public.stores (id) on delete cascade;
+update public.items set store_id = public.default_store_id() where store_id is null;
+update public.sales set store_id = public.default_store_id() where store_id is null;
+update public.access_codes set store_id = public.default_store_id() where store_id is null;
+alter table public.items alter column store_id set not null;
+alter table public.sales alter column store_id set not null;
+alter table public.access_codes alter column store_id set not null;
+
+create index if not exists items_store on public.items (store_id);
+create index if not exists sales_store_created_at on public.sales (store_id, created_at desc);
+create index if not exists access_codes_store on public.access_codes (store_id);
+
+-- A barcode can belong to only one item in a store; two stores may stock the
+-- same product with the same barcode. Items without a barcode are fine.
+drop index if exists public.items_barcode_unique;
+create unique index if not exists items_store_barcode_unique
+  on public.items (store_id, barcode) where barcode <> '';
+
 -- Access rules ------------------------------------------------------------------
 
 alter table public.items enable row level security;
 alter table public.item_photos enable row level security;
 alter table public.item_costs enable row level security;
 alter table public.profiles enable row level security;
+alter table public.stores enable row level security;
+alter table public.store_members enable row level security;
 alter table public.access_codes enable row level security;
 alter table public.sales enable row level security;
 alter table public.sale_lines enable row level security;
 
+-- Earlier versions' rules, which did not know about stores.
 drop policy if exists "Signed-in users can use items" on public.items;
 drop policy if exists "Anyone can use items" on public.items;
 drop policy if exists "Staff can use items" on public.items;
-create policy "Staff can use items" on public.items
-  for all to authenticated using (public.is_staff()) with check (public.is_staff());
-
 drop policy if exists "Signed-in users can use item photos" on public.item_photos;
 drop policy if exists "Anyone can use item photos" on public.item_photos;
 drop policy if exists "Staff can use item photos" on public.item_photos;
-create policy "Staff can use item photos" on public.item_photos
-  for all to authenticated using (public.is_staff()) with check (public.is_staff());
-
 drop policy if exists "Back office can use item costs" on public.item_costs;
 drop policy if exists "Super admin can use item costs" on public.item_costs;
 drop policy if exists "Staff can use item costs" on public.item_costs;
-create policy "Staff can use item costs" on public.item_costs
-  for all to authenticated using (public.is_staff()) with check (public.is_staff());
-
 drop policy if exists "Read own profile or all as super admin" on public.profiles;
-create policy "Read own profile or all as super admin" on public.profiles
-  for select to authenticated using (user_id = (select auth.uid()) or public.is_super_admin());
-
--- A super admin can change other people's roles, never their own, so there is
--- always at least one super admin left.
 drop policy if exists "Super admin can change other roles" on public.profiles;
-create policy "Super admin can change other roles" on public.profiles
-  for update to authenticated
-  using (public.is_super_admin() and user_id <> (select auth.uid()))
-  with check (public.is_super_admin() and user_id <> (select auth.uid()));
-
 drop policy if exists "Super admin can use passcodes" on public.access_codes;
 drop policy if exists "Staff can use passcodes" on public.access_codes;
-create policy "Staff can use passcodes" on public.access_codes
-  for all to authenticated using (public.is_staff()) with check (public.is_staff());
-
--- Staff can read sales. Nobody writes them directly: record_sale() and
--- void_sale() below are the only way in.
 drop policy if exists "Staff can read sales" on public.sales;
-create policy "Staff can read sales" on public.sales
-  for select to authenticated using (public.is_staff());
-
 drop policy if exists "Staff can read sale lines" on public.sale_lines;
-create policy "Staff can read sale lines" on public.sale_lines
-  for select to authenticated using (public.is_staff());
+
+drop policy if exists "Store staff can use items" on public.items;
+create policy "Store staff can use items" on public.items
+  for all to authenticated using (public.is_store_member(store_id)) with check (public.is_store_member(store_id));
+
+drop policy if exists "Store staff can use item photos" on public.item_photos;
+create policy "Store staff can use item photos" on public.item_photos
+  for all to authenticated
+  using (exists (select 1 from public.items i where i.id = item_id and public.is_store_member(i.store_id)))
+  with check (exists (select 1 from public.items i where i.id = item_id and public.is_store_member(i.store_id)));
+
+drop policy if exists "Store staff can use item costs" on public.item_costs;
+create policy "Store staff can use item costs" on public.item_costs
+  for all to authenticated
+  using (exists (select 1 from public.items i where i.id = item_id and public.is_store_member(i.store_id)))
+  with check (exists (select 1 from public.items i where i.id = item_id and public.is_store_member(i.store_id)));
+
+drop policy if exists "See own profile or your store's people" on public.profiles;
+create policy "See own profile or your store's people" on public.profiles
+  for select to authenticated using (public.can_see_profile(user_id));
+
+drop policy if exists "Members can see their stores" on public.stores;
+create policy "Members can see their stores" on public.stores
+  for select to authenticated using (public.is_store_member(id));
+
+drop policy if exists "Super admin can rename the store" on public.stores;
+create policy "Super admin can rename the store" on public.stores
+  for update to authenticated using (public.is_store_super_admin(id)) with check (public.is_store_super_admin(id));
+
+drop policy if exists "See own memberships or your store's people" on public.store_members;
+create policy "See own memberships or your store's people" on public.store_members
+  for select to authenticated using (user_id = (select auth.uid()) or public.is_store_super_admin(store_id));
+
+-- A super admin can change other people's roles in their store, never their
+-- own, so every store keeps at least one super admin.
+drop policy if exists "Super admin can change other roles in the store" on public.store_members;
+create policy "Super admin can change other roles in the store" on public.store_members
+  for update to authenticated
+  using (public.is_store_super_admin(store_id) and user_id <> (select auth.uid()))
+  with check (public.is_store_super_admin(store_id) and user_id <> (select auth.uid()));
+
+drop policy if exists "Store staff can use passcodes" on public.access_codes;
+create policy "Store staff can use passcodes" on public.access_codes
+  for all to authenticated using (public.is_store_member(store_id)) with check (public.is_store_member(store_id));
+
+-- Store staff can read their sales. Nobody writes them directly: record_sale(),
+-- edit_sale() and void_sale() below are the only way in.
+drop policy if exists "Store staff can read sales" on public.sales;
+create policy "Store staff can read sales" on public.sales
+  for select to authenticated using (public.is_store_member(store_id));
+
+drop policy if exists "Store staff can read sale lines" on public.sale_lines;
+create policy "Store staff can read sale lines" on public.sale_lines
+  for select to authenticated
+  using (exists (select 1 from public.sales s where s.id = sale_id and public.is_store_member(s.store_id)));
 
 revoke all on public.sales, public.sale_lines from anon, authenticated;
 grant select on public.sales, public.sale_lines to authenticated;
 
-revoke all on public.items, public.item_photos, public.item_costs, public.profiles, public.access_codes from anon;
+revoke all on public.items, public.item_photos, public.item_costs, public.profiles, public.stores,
+  public.store_members, public.access_codes from anon;
 grant select, insert, update, delete on public.items, public.item_photos, public.item_costs, public.access_codes to authenticated;
-revoke all on public.profiles from authenticated;
-grant select, update (role) on public.profiles to authenticated;
+revoke all on public.profiles, public.stores, public.store_members from authenticated;
+grant select on public.profiles to authenticated;
+grant select, update (name) on public.stores to authenticated;
+grant select, update (role) on public.store_members to authenticated;
+
+revoke all on function public.store_role(uuid), public.is_store_member(uuid), public.is_store_super_admin(uuid),
+  public.can_see_profile(uuid) from public, anon;
+grant execute on function public.store_role(uuid), public.is_store_member(uuid), public.is_store_super_admin(uuid),
+  public.can_see_profile(uuid) to authenticated;
+revoke all on function public.default_store_id() from public, anon, authenticated;
+
+-- Creates another store. Any super admin may, and becomes its super admin.
+create or replace function public.create_store(p_name text, p_slug text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  v_slug text := lower(trim(coalesce(p_slug, '')));
+  v_name text := trim(coalesce(p_name, ''));
+  v_store public.stores%rowtype;
+begin
+  if not exists (select 1 from public.store_members where user_id = (select auth.uid()) and role = 'super_admin') then
+    raise exception 'Only a super admin can create a store.' using errcode = '42501';
+  end if;
+  if length(v_name) not between 1 and 80 then
+    raise exception 'Give the store a name.' using errcode = 'P0001';
+  end if;
+  if v_slug !~ '^[a-z0-9][a-z0-9-]{1,29}$' then
+    raise exception 'The short name must be 2 to 30 lower-case letters, numbers or dashes.' using errcode = 'P0001';
+  end if;
+  if exists (select 1 from public.stores where slug = v_slug) then
+    raise exception 'Another store already uses that short name.' using errcode = 'P0001';
+  end if;
+  insert into public.stores (name, slug) values (v_name, v_slug) returning * into v_store;
+  insert into public.store_members (store_id, user_id, role) values (v_store.id, (select auth.uid()), 'super_admin');
+  return jsonb_build_object('id', v_store.id, 'name', v_store.name, 'slug', v_store.slug);
+end $$;
+
+revoke all on function public.create_store(text, text) from public, anon;
+grant execute on function public.create_store(text, text) to authenticated;
+
+-- Functions from before stores existed, no longer used.
+drop function if exists public.is_staff();
+drop function if exists public.is_super_admin();
+drop function if exists public.my_role();
 
 -- What people without an account can do -------------------------------------------
 -- These functions are the only way in for them. Each returns JSON so the app
@@ -302,8 +444,19 @@ grant execute on function public.login_status(text), public.login_failed(text) t
 revoke all on function public.login_succeeded() from public, anon;
 grant execute on function public.login_succeeded() to authenticated;
 
--- One item by its exact barcode, with its photo. Null when there is none.
-create or replace function public.lookup_item(p_barcode text)
+-- A store as the public may see it: its name and short name. p_store is the
+-- short name from the link; blank means the first store. Null when unknown.
+create or replace function public.store_info(p_store text)
+returns jsonb language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('id', s.id, 'name', s.name, 'slug', s.slug)
+    from public.stores s
+   where case when trim(coalesce(p_store, '')) = '' then s.id = public.default_store_id()
+              else s.slug = lower(trim(p_store)) end;
+$$;
+
+-- One item of a store by its exact barcode, with its photo. Null when there is none.
+drop function if exists public.lookup_item(text);
+create or replace function public.lookup_item(p_store text, p_barcode text)
 returns jsonb language sql stable security definer set search_path = '' as $$
   select to_jsonb(x) from (
     select i.id, i.barcode, i.name, i.description, i.price, i.qty,
@@ -312,6 +465,7 @@ returns jsonb language sql stable security definer set search_path = '' as $$
       left join public.item_photos p on p.item_id = i.id
      where trim(coalesce(p_barcode, '')) <> ''
        and i.barcode = trim(p_barcode)
+       and i.store_id = (public.store_info(p_store) ->> 'id')::uuid
      limit 1
   ) x;
 $$;
@@ -325,14 +479,16 @@ $$;
 -- the passcode is wrong.
 create or replace function public.list_items_with_code(p_code text)
 returns jsonb language plpgsql volatile security definer set search_path = '' as $$
+declare
+  v_code public.access_codes%rowtype := public.use_access_code(p_code);
 begin
-  if (public.use_access_code(p_code)).id is null then
+  if v_code.id is null then
     return null;
   end if;
   return coalesce((
     select jsonb_agg(to_jsonb(x)) from (
       select id, barcode, name, description, price, qty, photo_updated_at, updated_at
-        from public.items order by id
+        from public.items where store_id = v_code.store_id order by id
     ) x
   ), '[]'::jsonb);
 end $$;
@@ -340,29 +496,44 @@ end $$;
 -- Photos for up to 20 items at a time, for someone holding a valid passcode.
 create or replace function public.item_photos_with_code(p_code text, p_ids uuid[])
 returns jsonb language plpgsql volatile security definer set search_path = '' as $$
+declare
+  v_code public.access_codes%rowtype := public.use_access_code(p_code);
 begin
-  if (public.use_access_code(p_code)).id is null then
+  if v_code.id is null then
     return null;
   end if;
   return coalesce((
     select jsonb_agg(jsonb_build_object('item_id', p.item_id, 'data', p.data))
       from public.item_photos p
-     where p.item_id = any (p_ids[1:20])
+      join public.items i on i.id = p.item_id
+     where p.item_id = any (p_ids[1:20]) and i.store_id = v_code.store_id
   ), '[]'::jsonb);
 end $$;
 
-revoke all on function public.my_role(), public.is_staff(), public.is_super_admin() from public, anon;
-grant execute on function public.my_role(), public.is_staff(), public.is_super_admin() to authenticated;
 revoke all on function public.access_code_ok(text), public.use_access_code(text), public.caller_ip() from public, anon, authenticated;
 revoke all on function public.items_touch_updated_at() from public, anon, authenticated;
-revoke all on function public.lookup_item(text), public.list_items_with_code(text), public.item_photos_with_code(text, uuid[]) from public;
-grant execute on function public.lookup_item(text), public.list_items_with_code(text), public.item_photos_with_code(text, uuid[]) to anon, authenticated;
+revoke all on function public.store_info(text), public.lookup_item(text, text), public.list_items_with_code(text), public.item_photos_with_code(text, uuid[]) from public;
+grant execute on function public.store_info(text), public.lookup_item(text, text), public.list_items_with_code(text), public.item_photos_with_code(text, uuid[]) to anon, authenticated;
 
 -- What kind of passcode this is: 'view', 'cashier', or null when it is not valid.
 create or replace function public.access_code_kind(p_code text)
 returns text language sql volatile security definer set search_path = '' as $$
   select (public.use_access_code(p_code)).kind;
 $$;
+
+-- What a passcode opens: its kind and its store. Null when it is not valid.
+create or replace function public.access_code_info(p_code text)
+returns jsonb language plpgsql volatile security definer set search_path = '' as $$
+declare
+  v_code public.access_codes%rowtype := public.use_access_code(p_code);
+begin
+  if v_code.id is null then
+    return null;
+  end if;
+  return (select jsonb_build_object('kind', v_code.kind,
+                                    'store', jsonb_build_object('id', s.id, 'name', s.name, 'slug', s.slug))
+            from public.stores s where s.id = v_code.store_id);
+end $$;
 
 -- True when the caller typed their password within the last 10 minutes. Used
 -- to make changing or cancelling a sale need a fresh password, not just an
@@ -402,8 +573,8 @@ begin
     raise exception 'That is too many items for one sale.' using errcode = 'P0001';
   end if;
 
-  insert into public.sales (id, code_id, sold_by)
-  values (v_sale_id, v_code.id, coalesce(nullif(trim(v_code.label), ''), 'Cashier'));
+  insert into public.sales (id, store_id, code_id, sold_by)
+  values (v_sale_id, v_code.store_id, v_code.id, coalesce(nullif(trim(v_code.label), ''), 'Cashier'));
 
   -- The same item twice in the cart counts once; a fixed order avoids two
   -- sales locking each other.
@@ -416,7 +587,7 @@ begin
     if v_line.item_id is null or v_line.qty is null or v_line.qty <= 0 then
       raise exception 'Every quantity must be 1 or more.' using errcode = 'P0001';
     end if;
-    select * into v_item from public.items where id = v_line.item_id for update;
+    select * into v_item from public.items where id = v_line.item_id and store_id = v_code.store_id for update;
     if not found then
       raise exception 'An item in the cart no longer exists. Remove it and try again.' using errcode = 'P0001';
     end if;
@@ -438,20 +609,18 @@ begin
   return jsonb_build_object('sale_id', v_sale_id, 'total', v_total);
 end $$;
 
--- Cancels a sale and puts its items back in stock. Staff only.
+-- Cancels a sale and puts its items back in stock. Staff of the sale's store only.
 create or replace function public.void_sale(p_sale_id uuid)
 returns void language plpgsql security definer set search_path = '' as $$
 declare
   v_sale public.sales%rowtype;
 begin
-  if not public.is_staff() then
-    raise exception 'permission denied' using errcode = '42501';
-  end if;
   if not public.password_recent() then
     raise exception 'Enter your password to confirm this change.' using errcode = 'P0001';
   end if;
+  -- Only staff of the sale's own store; anyone else is told it does not exist.
   select * into v_sale from public.sales where id = p_sale_id for update;
-  if not found then
+  if not found or not public.is_store_member(v_sale.store_id) then
     raise exception 'That sale no longer exists.' using errcode = 'P0001';
   end if;
   if v_sale.voided_at is not null then
@@ -467,7 +636,7 @@ begin
    where id = p_sale_id;
 end $$;
 
--- Corrects a sale after the fact. Staff only. p_lines is a JSON array of
+-- Corrects a sale after the fact. Staff of the sale's store only. p_lines is a JSON array of
 -- {"line_id": "...", "qty": 2, "price": 100}; a line left out stays as it is,
 -- and qty 0 removes it. Stock follows the change: selling fewer puts items
 -- back, selling more takes them out (and is refused if there are not enough).
@@ -481,14 +650,12 @@ declare
   v_delta integer;
   v_total numeric(14, 2);
 begin
-  if not public.is_staff() then
-    raise exception 'permission denied' using errcode = '42501';
-  end if;
   if not public.password_recent() then
     raise exception 'Enter your password to confirm this change.' using errcode = 'P0001';
   end if;
+  -- Only staff of the sale's own store; anyone else is told it does not exist.
   select * into v_sale from public.sales where id = p_sale_id for update;
-  if not found then
+  if not found or not public.is_store_member(v_sale.store_id) then
     raise exception 'That sale no longer exists.' using errcode = 'P0001';
   end if;
   if v_sale.voided_at is not null then
@@ -553,8 +720,8 @@ grant execute on function public.password_recent() to authenticated;
 revoke all on function public.edit_sale(uuid, jsonb) from public, anon;
 grant execute on function public.edit_sale(uuid, jsonb) to authenticated;
 
-revoke all on function public.access_code_kind(text), public.record_sale(text, jsonb) from public;
-grant execute on function public.access_code_kind(text), public.record_sale(text, jsonb) to anon, authenticated;
+revoke all on function public.access_code_kind(text), public.access_code_info(text), public.record_sale(text, jsonb) from public;
+grant execute on function public.access_code_kind(text), public.access_code_info(text), public.record_sale(text, jsonb) to anon, authenticated;
 revoke all on function public.void_sale(uuid) from public, anon;
 grant execute on function public.void_sale(uuid) to authenticated;
 
@@ -586,13 +753,20 @@ begin
 end $$;
 
 -- The first super admin -----------------------------------------------------------
--- While nobody has a role yet and there is exactly one account, that account
--- becomes the super admin. To pick one yourself instead, run:
---   insert into public.profiles (user_id, email, role)
---   select id, email, 'super_admin' from auth.users where email = 'you@example.com';
+-- While nobody belongs to any store and there is exactly one account, that
+-- account becomes the first store's super admin. To pick one yourself, run:
+--   insert into public.profiles (user_id, email) select id, email from auth.users
+--    where email = 'you@example.com' on conflict do nothing;
+--   insert into public.store_members (store_id, user_id, role)
+--   select public.default_store_id(), id, 'super_admin' from auth.users where email = 'you@example.com';
 
-insert into public.profiles (user_id, email, role)
-select u.id, coalesce(u.email, ''), 'super_admin'
-  from auth.users u
- where not exists (select 1 from public.profiles)
+insert into public.profiles (user_id, email)
+select u.id, coalesce(u.email, '') from auth.users u
+ where not exists (select 1 from public.store_members)
+   and (select count(*) from auth.users) = 1
+on conflict (user_id) do nothing;
+
+insert into public.store_members (store_id, user_id, role)
+select public.default_store_id(), p.user_id, 'super_admin' from public.profiles p
+ where not exists (select 1 from public.store_members)
    and (select count(*) from auth.users) = 1;

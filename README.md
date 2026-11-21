@@ -30,6 +30,28 @@ Android and iOS with nothing to install from an app store.
 Supported codes: EAN-13, EAN-8, UPC-A, UPC-E, Code 128, Code 39, Code 93, ITF,
 Codabar, QR and Data Matrix.
 
+## Stores
+
+The app can run several stores, kept completely apart: each store has its own
+products, sales, passcodes and people, and nothing from one store is visible
+from another. One account can belong to several stores (with a role in each),
+for example an owner who monitors all of them.
+
+- **Each store has its own link**, such as `…vercel.app/?store=market`. A link
+  without `?store=` opens the first store. Barcode lookups on a link only search
+  that store.
+- **A passcode opens its own store**, whichever link it is typed on.
+- **Signed-in staff** see a store switcher when they work at more than one
+  store, in the back office and in the app's Menu.
+- **Back office → Store** shows the store's link, renames it, and (for a super
+  admin) creates another store. The creator becomes its super admin.
+- **Users** are per store. Adding an email that already has an account (for
+  instance at another store) just adds that person, with their own password.
+  Removing someone takes them out of this store only; an account left in no
+  store is deleted.
+- A super admin can reset a password only for someone whose every store they
+  also run, because a password opens all of that person's stores.
+
 ## Who can do what
 
 | Visitor | Can do |
@@ -38,7 +60,7 @@ Codabar, QR and Data Matrix.
 | With a view-only passcode | Also view and search the whole list of items (read-only) |
 | With a cashier passcode | Also sell: add items to a cart, optionally set a custom price for that sale, and confirm it, which takes the items out of stock |
 | **Admin** (signed in) | Add, change and delete items, change stock, generate barcodes, import and export CSV, original prices and profit, passcodes |
-| **Super admin** (signed in) | Everything an admin can, plus user accounts |
+| **Super admin** (signed in) | Everything an admin can, plus the store's user accounts and creating stores |
 
 These rules are enforced by the database (`supabase/setup.sql`), not only by
 the app, so they hold even for someone who talks to the database directly.

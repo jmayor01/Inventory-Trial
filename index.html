@@ -18,7 +18,10 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5V8ZM3 8l9 5 9-5M12 13v8"/></svg></span>
-      <h1>Inventory</h1>
+      <div class="brand-text">
+        <h1>Inventory</h1>
+        <span id="storeNameTop" class="brand-store" hidden></span>
+      </div>
     </div>
     <button id="menuBtn" class="btn ghost" aria-haspopup="dialog">Menu</button>
   </header>
@@ -205,8 +208,12 @@
     <p class="hint" data-show="staff">Signed in as <strong id="accountEmail"></strong> (<span id="accountRole"></span>)</p>
     <p class="hint" data-show="viewer" id="viewerNote">You are viewing the list with a passcode.</p>
     <div class="stack">
-      <a class="btn" href="admin.html" data-show="staff">Back office</a>
-      <a class="btn" href="admin.html" data-show="public viewer">Staff sign in</a>
+      <div id="storeSwitchRow" data-show="staff" hidden>
+        <label for="storeSwitch">Store</label>
+        <select id="storeSwitch"></select>
+      </div>
+      <a class="btn" href="admin.html" id="backOfficeLink" data-show="staff">Back office</a>
+      <a class="btn" href="admin.html" id="staffSignInLink" data-show="public viewer">Staff sign in</a>
       <button type="button" id="lockBtn" class="btn" data-show="viewer">Forget passcode on this device</button>
       <button type="button" id="signOutBtn" class="btn" data-show="staff">Sign out</button>
     </div>

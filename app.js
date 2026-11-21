@@ -13,6 +13,7 @@
 const CACHE_KEY = 'inventory.cache.v3';
 const PASSCODE_KEY = 'inventory.passcode';
 const PASSCODE_KIND_KEY = 'inventory.passcodeKind'; // 'view' | 'cashier'
+const PASSCODE_STORE_KEY = 'inventory.passcodeStore'; // the store a passcode opens
 const CART_KEY = 'inventory.cart';
 const ROLE_KEY = 'inventory.role'; // last known role, so staff can open the app offline
 const LEGACY_KEY = 'inventory.items.v1'; // items from before the inventory was shared
@@ -26,6 +27,10 @@ const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INV
 let items = [];
 let loaded = false; // false until the list has come from the server or the offline copy
 let mode = 'boot'; // 'boot' | 'public' | 'viewer' | 'staff'
+// The store on screen: { id, name, slug }. The public get it from the link,
+// passcode holders from their passcode, staff from the stores they work at.
+let store = null;
+let myStores = []; // staff: every store this account works at, with its role
 let role = null; // 'admin' | 'super_admin' when mode is 'staff'
 let passcode = ''; // the passcode in use when mode is 'viewer'
 let cashier = false; // true when that passcode is a cashier's
@@ -45,20 +50,21 @@ const stored = {
 function readCache() {
   try {
     const c = JSON.parse(stored.get(CACHE_KEY));
-    return c && c.mode === mode && Array.isArray(c.items) ? c.items : null;
+    return c && c.mode === mode && store && c.storeId === store.id && Array.isArray(c.items) ? c.items : null;
   } catch {
     return null;
   }
 }
 
 function writeCache() {
-  if (mode === 'staff' || mode === 'viewer') stored.set(CACHE_KEY, JSON.stringify({ mode, items }));
+  if ((mode === 'staff' || mode === 'viewer') && store) stored.set(CACHE_KEY, JSON.stringify({ mode, storeId: store.id, items }));
 }
 
 /** Removes everything this device remembers about the inventory. */
 function forgetPasscode() {
   stored.remove(PASSCODE_KEY);
   stored.remove(PASSCODE_KIND_KEY);
+  stored.remove(PASSCODE_STORE_KEY);
   forgetInventory();
 }
 
@@ -76,9 +82,11 @@ function setStatus(text) {
 async function refresh() {
   const forMode = mode;
   let rows = [];
+  const forStore = store && store.id;
   if (mode === 'staff') {
+    if (!forStore) return;
     for (let from = 0; ; from += 1000) {
-      const { data, error } = await sb.from('items').select(ITEM_COLUMNS).order('id').range(from, from + 999);
+      const { data, error } = await sb.from('items').select(ITEM_COLUMNS).eq('store_id', forStore).order('id').range(from, from + 999);
       if (error) throw error;
       rows.push(...data);
       if (data.length < 1000) break;
@@ -91,7 +99,7 @@ async function refresh() {
   } else {
     return;
   }
-  if (forMode !== mode) return; // signed in or out meanwhile
+  if (forMode !== mode || (store && store.id) !== forStore) return; // signed in or out, or switched store, meanwhile
   items = rows.map(fromRow);
   loaded = true;
   writeCache();
@@ -131,8 +139,8 @@ let channel = null;
 function setRealtime(on) {
   if (channel) { sb.removeChannel(channel); channel = null; }
   if (on) {
-    channel = sb.channel('items-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, scheduleRefresh)
+    channel = sb.channel(`items-${store.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items', filter: `store_id=eq.${store.id}` }, scheduleRefresh)
       .subscribe();
   }
 }
@@ -159,7 +167,8 @@ function setMode(next, sell) {
   const cached = next === 'staff' || next === 'viewer' ? readCache() : null;
   items = cached || [];
   loaded = next === 'public' || Boolean(cached);
-  setRealtime(next === 'staff');
+  setRealtime(next === 'staff' && Boolean(store));
+  showStore();
   render();
 }
 
@@ -180,10 +189,36 @@ function enterStaff(newRole, email) {
   role = newRole;
   passcode = '';
   $('accountEmail').textContent = email || '';
-  $('accountRole').textContent = newRole === 'super_admin' ? 'super admin' : 'admin';
+  $('accountRole').textContent = `${newRole === 'super_admin' ? 'super admin' : 'admin'}${store ? ` at ${store.name}` : ''}`;
   setMode('staff');
   refreshQuietly().then(offerLegacyUpload);
 }
+
+/** Shows which store this is, and points the links at it. */
+function showStore() {
+  const top = $('storeNameTop');
+  top.textContent = store ? store.name : '';
+  top.hidden = !store;
+  document.title = store ? `${store.name} · Inventory` : 'Inventory';
+  const q = store ? `?store=${encodeURIComponent(store.slug)}` : '';
+  $('backOfficeLink').href = `admin.html${q}`;
+  $('staffSignInLink').href = `admin.html${q}`;
+  const select = $('storeSwitch');
+  select.replaceChildren(...myStores.map((s) => { const o = el('option', '', s.name); o.value = s.slug; o.selected = store && s.id === store.id; return o; }));
+  $('storeSwitchRow').hidden = !(mode === 'staff' && myStores.length > 1);
+}
+
+/** Staff: opens one of their stores. */
+function switchStore(slug) {
+  const next = myStores.find((s) => s.slug === slug) || myStores[0];
+  if (!next) return;
+  store = { id: next.id, name: next.name, slug: next.slug };
+  rememberStore(store.slug);
+  showStoreInLink(store.slug);
+  enterStaff(next.role, $('accountEmail').textContent);
+}
+
+$('storeSwitch').addEventListener('change', () => { $('menuDlg').close(); switchStore($('storeSwitch').value); });
 
 // ---------- Public barcode lookup ----------
 
@@ -193,7 +228,8 @@ async function lookupBarcode(value) {
   $('search').value = code;
   lookup = { state: 'loading', code, item: null, message: '' };
   render();
-  const { data, error } = await sb.rpc('lookup_item', { p_barcode: code });
+  if (!store) { lookup = { state: 'error', code, item: null, message: 'This store link is not valid. Ask the store for its link.' }; render(); return; }
+  const { data, error } = await sb.rpc('lookup_item', { p_store: store.slug, p_barcode: code });
   if (mode !== 'public' || lookup.code !== code) return; // superseded
   if (error) {
     lookup = { state: 'error', code, item: null, message: explain(error, 'Could not look up that barcode. Please try again.') };
@@ -496,7 +532,7 @@ $('itemForm').addEventListener('submit', async (e) => {
   $('formError').hidden = true;
   setFormBusy(true);
   try {
-    const query = isEdit ? sb.from('items').update(row).eq('id', editingId) : sb.from('items').insert(row);
+    const query = isEdit ? sb.from('items').update(row).eq('id', editingId) : sb.from('items').insert({ ...row, store_id: store.id });
     const { data, error } = await query.select(ITEM_COLUMNS).single();
     if (error) return showFormError(explain(error, isEdit ? 'Could not save. The item may have been deleted by someone else.' : 'Could not save the item.'));
     let saved = fromRow(data);
@@ -807,10 +843,11 @@ $('unlockForm').addEventListener('submit', async (e) => {
   err.hidden = true;
   if (!code) { $('unlockCode').focus(); return; }
   $('unlockBtn').disabled = true;
-  const kindReply = await sb.rpc('access_code_kind', { p_code: code });
-  const kind = kindReply.data;
-  let { data, error } = kindReply.error || !kind
-    ? { data: null, error: kindReply.error || { code: '28000' } }
+  const infoReply = await sb.rpc('access_code_info', { p_code: code });
+  const info = infoReply.data;
+  const kind = info && info.kind;
+  let { data, error } = infoReply.error || !kind
+    ? { data: null, error: infoReply.error || { code: '28000' } }
     : await sb.rpc('list_items_with_code', { p_code: code });
   if (!error && data === null) error = { code: '28000' };
   $('unlockBtn').disabled = false;
@@ -823,8 +860,10 @@ $('unlockForm').addEventListener('submit', async (e) => {
   $('unlockCode').value = '';
   stored.set(PASSCODE_KEY, code);
   stored.set(PASSCODE_KIND_KEY, kind);
+  stored.set(PASSCODE_STORE_KEY, JSON.stringify(info.store));
   role = null;
   passcode = code;
+  store = info.store; // a passcode opens its own store, whatever the link says
   setMode('viewer', kind === 'cashier');
   items = (data || []).map(fromRow);
   loaded = true;
@@ -900,7 +939,7 @@ $('importFile').addEventListener('change', async (e) => {
       id = crypto.randomUUID();
       if (barcode) idByBarcode.set(barcode, id);
     }
-    out.set(id, { id, barcode, name, description: get(r, 'description'), price: toNumber(get(r, 'price')), qty: Math.round(toNumber(get(r, 'qty'))) });
+    out.set(id, { id, store_id: store.id, barcode, name, description: get(r, 'description'), price: toNumber(get(r, 'price')), qty: Math.round(toNumber(get(r, 'qty'))) });
   }
   const all = [...out.values()];
   for (let i = 0; i < all.length; i += 500) {
@@ -948,7 +987,7 @@ async function uploadLegacy() {
     if (barcode) taken.add(barcode);
     const id = crypto.randomUUID();
     newIdFor.set(o.id, id);
-    rows.push({ id, barcode, name: String(o.name), description: String(o.description || ''), price: toNumber(o.price), qty: Math.round(toNumber(o.qty)) });
+    rows.push({ id, store_id: store.id, barcode, name: String(o.name), description: String(o.description || ''), price: toNumber(o.price), qty: Math.round(toNumber(o.qty)) });
   }
   for (let i = 0; i < rows.length; i += 500) {
     const { error } = await sb.from('items').insert(rows.slice(i, i + 500));
@@ -1103,23 +1142,30 @@ async function applySession(session) {
   sessionUserId = id;
 
   if (id) {
-    const { data, error } = await sb.from('profiles').select('role').eq('user_id', id).maybeSingle();
-    if (sessionUserId !== id) return; // changed while we were asking
-    let found = data ? data.role : null;
-    if (error) {
-      // Offline: trust the role this device saw last time for the same account.
+    let stores = null;
+    try {
+      stores = await loadMyStores(id);
+    } catch {
+      // Offline: trust the stores this device saw last time for the same account.
       try {
         const last = JSON.parse(stored.get(ROLE_KEY));
-        if (last && last.userId === id) found = last.role;
+        if (last && last.userId === id && Array.isArray(last.stores)) stores = last.stores;
       } catch { /* none remembered */ }
     }
-    if (found === 'admin' || found === 'super_admin') {
-      stored.set(ROLE_KEY, JSON.stringify({ userId: id, role: found }));
-      enterStaff(found, user.email);
+    if (sessionUserId !== id) return; // changed while we were asking
+    if (stores && stores.length) {
+      stored.set(ROLE_KEY, JSON.stringify({ userId: id, stores }));
+      myStores = stores;
+      const chosen = chooseStore(stores);
+      store = { id: chosen.id, name: chosen.name, slug: chosen.slug };
+      rememberStore(store.slug);
+      showStoreInLink(store.slug);
+      enterStaff(chosen.role, user.email);
       return;
     }
     stored.remove(ROLE_KEY);
   }
+  myStores = [];
 
   // Not signed in (any more): a staff copy of the inventory must not linger,
   // for instance after a sign-in without "Remember me" ended with the browser.
@@ -1129,14 +1175,28 @@ async function applySession(session) {
   } catch { /* nothing cached */ }
 
   const code = stored.get(PASSCODE_KEY);
-  if (!code) { enterPublic(); return; }
-  enterViewer(code, stored.get(PASSCODE_KIND_KEY));
-  // The passcode may have been switched between view-only and cashier since.
-  const { data: kind } = await sb.rpc('access_code_kind', { p_code: code });
-  if (kind && mode === 'viewer' && passcode === code && (kind === 'cashier') !== cashier) {
-    stored.set(PASSCODE_KIND_KEY, kind);
-    enterViewer(code, kind);
+  if (code) {
+    try { store = JSON.parse(stored.get(PASSCODE_STORE_KEY)); } catch { store = null; }
+    enterViewer(code, stored.get(PASSCODE_KIND_KEY));
+    // The passcode may have been switched between view-only and cashier, or
+    // its store renamed, since.
+    const { data: info } = await sb.rpc('access_code_info', { p_code: code });
+    if (info && mode === 'viewer' && passcode === code) {
+      stored.set(PASSCODE_KIND_KEY, info.kind);
+      stored.set(PASSCODE_STORE_KEY, JSON.stringify(info.store));
+      const changedKind = (info.kind === 'cashier') !== cashier;
+      store = info.store;
+      if (changedKind) enterViewer(code, info.kind); else showStore();
+    }
+    return;
   }
+
+  // Everyone else: the store in the link (or the main store when there is none).
+  const { data: found, error: findError } = await sb.rpc('store_info', { p_store: storeFromLink() || null });
+  store = found || null;
+  enterPublic();
+  if (findError) setStatus(explain(findError, 'Could not open the store. Check the connection and reload.'));
+  else if (!found) setStatus('This store link is not valid. Ask the store for its link.');
 }
 
 // Supabase must not be called from inside this callback, hence the timeout.

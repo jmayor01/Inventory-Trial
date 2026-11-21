@@ -70,6 +70,10 @@ h1, h2, p, dl { margin: 0; }
   display: grid; place-items: center; width: 34px; height: 34px;
   border-radius: 10px; background: var(--primary); color: var(--primary-text);
 }
+.brand-text { display: flex; flex-direction: column; min-width: 0; }
+.brand-store { color: var(--muted); font-size: .8rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#storeSwitchRow label { margin-top: 0; }
+#storeSwitchRow select { width: 100%; margin-bottom: 4px; }
 .topbar h1 { font-size: 1.2rem; letter-spacing: -.01em; }
 
 main { max-width: 720px; margin: 0 auto; padding: 14px 16px; }
@@ -393,7 +397,14 @@ body.admin:not([data-view="norole"]) #noRoleView { display: none; }
 /* Parts only the super admin sees. */
 body.admin:not([data-role="super_admin"]) [data-role="super_admin"] { display: none !important; }
 
-.whoami { margin-bottom: 10px; }
+.whoami { margin: 0; }
+.store-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 14px; margin-bottom: 12px; }
+.store-current { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.store-label { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+.store-current strong { font-size: 1.1rem; overflow-wrap: anywhere; }
+#storeSwitch { min-height: 44px; font-weight: 700; max-width: 100%; }
+#tab-store .card-form { margin-top: 12px; }
+#storeLinkText { font-size: .9rem; }
 .tabs { display: flex; gap: 4px; padding: 4px; margin-bottom: 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; }
 .tab {
   flex: 1; font: inherit; font-weight: 600; color: var(--muted);

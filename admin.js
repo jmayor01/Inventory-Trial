@@ -1,8 +1,9 @@
 'use strict';
 
-// The back office. Needs a sign-in, and what it shows depends on the role:
+// The back office. Needs a sign-in, and works in one store at a time (see
+// "Stores" in common.js). What it shows depends on the role in that store:
 //   admin       - products, original prices and profit, sales, passcodes, export
-//   super admin - the same, plus user accounts
+//   super admin - the same, plus the store's user accounts and new stores
 // The database enforces these rules (supabase/setup.sql); hiding things here
 // is only so that people are not shown buttons that would be refused.
 //
@@ -18,7 +19,9 @@ const sb = supabase.createClient(window.INVENTORY_CONFIG.supabaseUrl, window.INV
 let items = [];
 let loaded = false;
 let userId = null;
-let role = null; // 'admin' | 'super_admin'
+let role = null; // 'admin' | 'super_admin', in the current store
+let store = null; // { id, name, slug, role }: the store being worked on
+let myStores = []; // every store this account works at
 let userEmail = '';
 const isSuper = () => role === 'super_admin';
 let filter = 'all'; // 'all' | 'nocost' | 'loss'
@@ -43,10 +46,10 @@ function setStatus(text) {
   $('status').hidden = !text;
 }
 
-async function fetchAll(table, columns, orderBy) {
+async function fetchAll(table, columns, orderBy, narrow = (q) => q) {
   const rows = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from(table).select(columns).order(orderBy).range(from, from + 999);
+    const { data, error } = await narrow(sb.from(table).select(columns)).order(orderBy).range(from, from + 999);
     if (error) throw error;
     rows.push(...data);
     if (data.length < 1000) return rows;
@@ -55,11 +58,13 @@ async function fetchAll(table, columns, orderBy) {
 
 async function refresh() {
   const forUser = userId;
+  const forStore = store && store.id;
+  if (!forStore) return;
   const [itemRows, costRows] = await Promise.all([
-    fetchAll('items', ITEM_COLUMNS, 'id'),
-    fetchAll('item_costs', 'item_id,cost', 'item_id'),
+    fetchAll('items', ITEM_COLUMNS, 'id', (q) => q.eq('store_id', forStore)),
+    fetchAll('item_costs', 'item_id,cost,items!inner(store_id)', 'item_id', (q) => q.eq('items.store_id', forStore)),
   ]);
-  if (forUser !== userId) return; // signed out meanwhile
+  if (forUser !== userId || !store || forStore !== store.id) return; // signed out or switched store meanwhile
   const costs = new Map(costRows.map((r) => [r.item_id, Number(r.cost)]));
   items = itemRows.map((r) => ({ ...fromRow(r), cost: costs.has(r.id) ? costs.get(r.id) : null }));
   loaded = true;
@@ -268,7 +273,7 @@ $('itemForm').addEventListener('submit', async (e) => {
   $('formError').hidden = true;
   setFormBusy(true);
   try {
-    const query = isEdit ? sb.from('items').update(row).eq('id', editingId) : sb.from('items').insert(row);
+    const query = isEdit ? sb.from('items').update(row).eq('id', editingId) : sb.from('items').insert({ ...row, store_id: store.id });
     const { data, error } = await query.select(ITEM_COLUMNS).single();
     if (error) return showFormError(explain(error, isEdit ? 'Could not save. The product may have been deleted by someone else.' : 'Could not save the product.'));
     let saved = { ...fromRow(data), cost: before ? before.cost : null };
@@ -522,11 +527,11 @@ $('importGo').addEventListener('click', async () => {
     const fresh = [], updates = [], costs = [];
     for (const e of plan.rows) {
       if (e.existing) {
-        const row = { id: e.existing.id, name: e.name, barcode: e.barcode || e.existing.barcode || (generate ? newBarcode() : ''), description: e.description || e.existing.description, price: e.price ?? e.existing.price, qty: e.qty ?? e.existing.qty };
+        const row = { id: e.existing.id, store_id: store.id, name: e.name, barcode: e.barcode || e.existing.barcode || (generate ? newBarcode() : ''), description: e.description || e.existing.description, price: e.price ?? e.existing.price, qty: e.qty ?? e.existing.qty };
         updates.push(row);
         if (e.cost != null) costs.push({ item_id: row.id, cost: e.cost, updated_at: new Date().toISOString() });
       } else {
-        const row = { id: crypto.randomUUID(), name: e.name, barcode: e.barcode || (generate ? newBarcode() : ''), description: e.description, price: e.price ?? 0, qty: e.qty ?? 0 };
+        const row = { id: crypto.randomUUID(), store_id: store.id, name: e.name, barcode: e.barcode || (generate ? newBarcode() : ''), description: e.description, price: e.price ?? 0, qty: e.qty ?? 0 };
         fresh.push(row);
         if (e.cost != null) costs.push({ item_id: row.id, cost: e.cost, updated_at: new Date().toISOString() });
       }
@@ -788,7 +793,7 @@ const EXPORT_CURRENCY = '₱';
 $('exportBtn').addEventListener('click', () => {
   const S = XLSX_STYLE;
   const today = new Date();
-  const title = `INVENTORY as of ${today.toLocaleDateString(undefined, { dateStyle: 'medium' })}`;
+  const title = `${store.name.toUpperCase()} — INVENTORY as of ${today.toLocaleDateString(undefined, { dateStyle: 'medium' })}`;
   const headers = ['Qty', 'Particular', 'Orig Price', 'SRP', 'Profit', 'TOTAL', 'Barcode'];
   const rows = [
     [{ text: title, style: S.title }, ...headers.slice(1).map(() => ({ text: '', style: S.title }))],
@@ -818,7 +823,7 @@ $('exportBtn').addEventListener('click', () => {
   });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `inventory-${today.toISOString().slice(0, 10)}.xlsx`;
+  a.download = `inventory-${store.slug}-${today.toISOString().slice(0, 10)}.xlsx`;
   document.body.append(a);
   a.click();
   a.remove();
@@ -886,6 +891,7 @@ function showTab(name) {
   if (currentTab === 'sales') loadSales();
   if (currentTab === 'users') loadUsers();
   if (currentTab === 'codes') loadCodes();
+  if (currentTab === 'store') showStoreTab();
 }
 for (const tab of document.querySelectorAll('.tab')) tab.addEventListener('click', () => showTab(tab.dataset.tab));
 
@@ -965,6 +971,7 @@ async function loadSales() {
   const forPeriod = salesPeriod;
   let query = sb.from('sales')
     .select('id,created_at,sold_by,total,voided_at,voided_by,edited_at,edited_by,sale_lines(id,name,qty,price,list_price,cost)')
+    .eq('store_id', store.id)
     .order('created_at', { ascending: false })
     .limit(SALES_LIMIT);
   const from = periodStart();
@@ -1141,7 +1148,7 @@ const ROLE_NAMES = { admin: 'Admin', super_admin: 'Super admin' };
 
 /** Calls the manage-users server function, which holds the key needed to create accounts. */
 async function manageUsers(body) {
-  const { data, error } = await sb.functions.invoke('manage-users', { body });
+  const { data, error } = await sb.functions.invoke('manage-users', { body: { ...body, store_id: store.id } });
   if (!error) return data;
   let message = '';
   try {
@@ -1151,8 +1158,13 @@ async function manageUsers(body) {
 }
 
 async function loadUsers() {
-  const { data, error } = await sb.from('profiles').select('user_id,email,role,created_at').order('created_at');
+  const forStore = store.id;
+  const { data: rows, error } = await sb.from('store_members')
+    .select('user_id, role, created_at, profiles(email)')
+    .eq('store_id', forStore).order('created_at');
+  if (forStore !== store.id) return;
   if (error) { setStatus(explain(error, 'Could not load the users.')); return; }
+  const data = rows.map((r) => ({ user_id: r.user_id, role: r.role, email: (r.profiles && r.profiles.email) || '' }));
   const list = $('userList');
   list.replaceChildren();
   for (const u of data) {
@@ -1182,7 +1194,7 @@ async function loadUsers() {
         select.append(opt);
       }
       select.addEventListener('change', async () => {
-        const { data: changed, error: e } = await sb.from('profiles').update({ role: select.value }).eq('user_id', u.user_id).select('user_id');
+        const { data: changed, error: e } = await sb.from('store_members').update({ role: select.value }).eq('store_id', store.id).eq('user_id', u.user_id).select('user_id');
         if (e || !changed.length) toast(explain(e, 'Could not change the role.'));
         else toast(`${u.email} is now ${ROLE_NAMES[select.value].toLowerCase()}`);
         loadUsers();
@@ -1192,16 +1204,16 @@ async function loadUsers() {
       remove.setAttribute('aria-label', `Remove ${u.email}`);
       remove.addEventListener('click', async () => {
         const yes = await confirmDialog({
-          title: `Remove ${u.email}?`,
-          text: 'They will no longer be able to sign in. This cannot be undone.',
+          title: `Remove ${u.email} from ${store.name}?`,
+          text: 'They lose access to this store. If they work at another store, they keep that; if not, their account is deleted.',
           ok: 'Remove',
           danger: true,
         });
         if (!yes) return;
         remove.disabled = true;
         try {
-          await manageUsers({ action: 'delete', user_id: u.user_id });
-          toast('User removed');
+          const result = await manageUsers({ action: 'remove', user_id: u.user_id });
+          toast(result && result.deleted ? 'Removed, and their account deleted' : `Removed from ${store.name}`);
         } catch (e) {
           toast(e.message);
         }
@@ -1270,19 +1282,19 @@ $('userForm').addEventListener('submit', async (e) => {
   const password = $('uPassword').value;
   showError('userError', '');
   if (!/^\S+@\S+\.\S+$/.test(email)) { showError('userError', 'Enter a valid email address.'); $('uEmail').focus(); return; }
-  if (password.length < 8) { showError('userError', 'The password needs at least 8 characters.'); $('uPassword').focus(); return; }
+  if (password && password.length < 8) { showError('userError', 'The password needs at least 8 characters.'); $('uPassword').focus(); return; }
   $('userSave').disabled = true;
-  $('userSave').textContent = 'Creating…';
+  $('userSave').textContent = 'Adding…';
   try {
-    await manageUsers({ action: 'create', email, password, role: $('uRole').value });
+    const result = await manageUsers({ action: 'add', email, password, role: $('uRole').value });
     $('userForm').reset();
-    toast(`Account created for ${email}`);
+    toast(result && result.existing ? `${email} added to ${store.name} with their own password` : `Account created for ${email}`);
     loadUsers();
   } catch (err) {
     showError('userError', err.message);
   } finally {
     $('userSave').disabled = false;
-    $('userSave').textContent = 'Create user';
+    $('userSave').textContent = 'Add to store';
   }
 });
 
@@ -1297,7 +1309,7 @@ function randomCode() {
 }
 
 async function loadCodes() {
-  const { data, error } = await sb.from('access_codes').select('id,code,label,kind,created_at').order('created_at');
+  const { data, error } = await sb.from('access_codes').select('id,code,label,kind,created_at').eq('store_id', store.id).order('created_at');
   if (error) { setStatus(explain(error, 'Could not load the passcodes.')); return; }
   const list = $('codeList');
   list.replaceChildren();
@@ -1365,7 +1377,7 @@ $('codeForm').addEventListener('submit', async (e) => {
   showError('codeError', '');
   if (!/^[A-Z0-9]{8,64}$/.test(code)) { showError('codeError', 'Use 8 or more letters and numbers, with no spaces. A longer passcode is harder to guess.'); $('cCode').focus(); return; }
   $('codeSave').disabled = true;
-  const { error } = await sb.from('access_codes').insert({ code, label: $('cLabel').value.trim(), kind: $('cKind').value });
+  const { error } = await sb.from('access_codes').insert({ store_id: store.id, code, label: $('cLabel').value.trim(), kind: $('cKind').value });
   $('codeSave').disabled = false;
   if (error) { showError('codeError', error.code === '23505' ? 'That passcode already exists.' : explain(error, 'Could not create the passcode.')); return; }
   $('cLabel').value = '';
@@ -1373,6 +1385,103 @@ $('codeForm').addEventListener('submit', async (e) => {
   toast(`Passcode ${code} created`);
   loadCodes();
 });
+
+// ---------- Stores ----------
+
+function showStoreTab() {
+  $('storeLinkText').value = storeLink(store.slug);
+  $('storeNameInput').value = store.name;
+  showError('storeRenameError', '');
+  showError('newStoreError', '');
+}
+
+$('storeLinkCopy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('storeLinkText').value);
+    toast('Link copied');
+  } catch {
+    $('storeLinkText').select();
+    toast('Select the link and copy it by hand.');
+  }
+});
+
+$('storeRenameForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('storeNameInput').value.trim();
+  showError('storeRenameError', '');
+  if (!name) { showError('storeRenameError', 'Give the store a name.'); return; }
+  $('storeRenameSave').disabled = true;
+  const { data, error } = await sb.from('stores').update({ name }).eq('id', store.id).select('id');
+  $('storeRenameSave').disabled = false;
+  if (error || !data.length) { showError('storeRenameError', explain(error, 'Could not rename the store.')); return; }
+  store.name = name;
+  const mine = myStores.find((s) => s.id === store.id);
+  if (mine) mine.name = name;
+  showStore();
+  toast('Store renamed');
+});
+
+// Suggest a short name from the store name.
+$('newStoreName').addEventListener('input', () => {
+  if ($('newStoreSlug').dataset.touched) return;
+  $('newStoreSlug').value = $('newStoreName').value.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+});
+$('newStoreSlug').addEventListener('input', () => { $('newStoreSlug').dataset.touched = '1'; });
+
+$('storeCreateForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  showError('newStoreError', '');
+  const name = $('newStoreName').value.trim();
+  const slug = $('newStoreSlug').value.trim().toLowerCase();
+  if (!name) { showError('newStoreError', 'Give the store a name.'); return; }
+  if (!/^[a-z0-9][a-z0-9-]{1,29}$/.test(slug)) { showError('newStoreError', 'The short name must be 2 to 30 lower-case letters, numbers or dashes.'); return; }
+  $('newStoreSave').disabled = true;
+  const { data, error } = await sb.rpc('create_store', { p_name: name, p_slug: slug });
+  $('newStoreSave').disabled = false;
+  if (error) { showError('newStoreError', explain(error, 'Could not create the store.')); return; }
+  $('storeCreateForm').reset();
+  delete $('newStoreSlug').dataset.touched;
+  myStores = await loadMyStores(userId);
+  toast(`${data.name} created`);
+  currentTab = 'products'; // show the new, empty store
+  switchStore(data.slug);
+  window.scrollTo(0, 0);
+});
+
+/** Fills in the store name, the switcher and the links for the current store. */
+function showStore() {
+  $('storeTitle').textContent = store.name;
+  document.title = `${store.name} · Back office`;
+  for (const node of document.querySelectorAll('.store-name-here')) node.textContent = store.name;
+  const select = $('storeSwitch');
+  select.replaceChildren(...myStores.map((s) => { const o = el('option', '', s.name); o.value = s.slug; o.selected = s.id === store.id; return o; }));
+  select.hidden = myStores.length < 2;
+  $('storeTitle').hidden = myStores.length >= 2;
+  $('inventoryLink').href = `./?store=${encodeURIComponent(store.slug)}`;
+  $('whoRole').textContent = `${ROLE_NAMES[role]} at ${store.name}`;
+}
+
+/** Opens one of my stores, leaving nothing from the previous one on screen. */
+function switchStore(slug) {
+  const next = myStores.find((s) => s.slug === slug) || myStores[0];
+  if (!next) return;
+  store = next;
+  role = next.role;
+  rememberStore(store.slug);
+  showStoreInLink(store.slug);
+  items = [];
+  loaded = false;
+  filter = 'all';
+  $('search').value = '';
+  for (const d of document.querySelectorAll('dialog[open]')) d.close();
+  document.body.dataset.role = role;
+  showStore();
+  showTab(currentTab === 'users' && !isSuper() ? 'products' : currentTab);
+  render();
+  refreshQuietly();
+}
+
+$('storeSwitch').addEventListener('change', () => switchStore($('storeSwitch').value));
 
 // ---------- Sign in / out ----------
 
@@ -1388,6 +1497,8 @@ async function applySession(session) {
   sessionApplied = true;
   userId = id;
   role = null;
+  store = null;
+  myStores = [];
   setStatus('');
   // Leave nothing about products, prices or profit on screen between accounts.
   items = [];
@@ -1400,25 +1511,32 @@ async function applySession(session) {
     return;
   }
 
-  const { data, error } = await sb.from('profiles').select('role').eq('user_id', id).maybeSingle();
-  if (userId !== id) return; // changed while we were asking
-  if (error) {
+  let stores = [];
+  try {
+    stores = await loadMyStores(id);
+  } catch (error) {
+    if (userId !== id) return;
     document.body.dataset.view = 'app';
     render();
     setStatus(explain(error, 'Could not check your access. Reload the page to try again.'));
     return;
   }
-  if (!data || !ROLE_NAMES[data.role]) {
+  if (userId !== id) return; // changed while we were asking
+  if (!stores.length) {
     $('noRoleEmail').textContent = user.email || '';
     document.body.dataset.view = 'norole';
     return;
   }
-  role = data.role;
+  myStores = stores;
+  store = chooseStore(stores);
+  role = store.role;
+  rememberStore(store.slug);
+  showStoreInLink(store.slug);
   document.body.dataset.role = role;
   document.body.dataset.view = 'app';
   userEmail = user.email || '';
   $('whoEmail').textContent = userEmail;
-  $('whoRole').textContent = ROLE_NAMES[role];
+  showStore();
   $('cCode').value = randomCode();
   showTab('products');
   render();
