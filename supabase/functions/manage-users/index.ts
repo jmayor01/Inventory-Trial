@@ -104,7 +104,9 @@ Deno.serve(async (req) => {
       });
     }
     const userId = created.user.id;
-    const { error: profileError } = await admin.from('profiles').insert({ user_id: userId, email });
+    // profiles.role is from before stores existed and grants nothing; it is
+    // filled in only because older databases still require a value there.
+    const { error: profileError } = await admin.from('profiles').insert({ user_id: userId, email, role });
     const { error: memberError } = profileError
       ? { error: profileError }
       : await admin.from('store_members').insert({ store_id: storeId, user_id: userId, role });

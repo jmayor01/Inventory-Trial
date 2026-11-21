@@ -59,7 +59,8 @@ create table if not exists public.item_costs (
 -- One row per back-office account, holding its email address so that a super
 -- admin can see who is who. Accounts themselves are Supabase Auth users; the
 -- manage-users Edge Function creates both together. (The role column is from
--- before stores existed; roles now live in store_members.)
+-- before stores existed and is no longer used for access: roles live in
+-- store_members.)
 create table if not exists public.profiles (
   user_id uuid primary key references auth.users (id) on delete cascade,
   email text not null default '',
@@ -96,12 +97,13 @@ returns uuid language sql stable security definer set search_path = '' as $$
   select id from public.stores order by created_at, id limit 1;
 $$;
 
--- Roles from before stores existed become roles in the first store (once:
--- the old column is cleared afterwards, so nobody removed later is re-added).
+-- Roles from before stores existed become roles in the first store. This
+-- happens only once, while no store has members yet, so nobody removed from a
+-- store later is put back.
 insert into public.store_members (store_id, user_id, role)
-select public.default_store_id(), user_id, role from public.profiles where role is not null
+select public.default_store_id(), user_id, role from public.profiles
+ where role is not null and not exists (select 1 from public.store_members)
 on conflict (store_id, user_id) do nothing;
-update public.profiles set role = null where role is not null;
 
 -- The caller's role in a store: null when not signed in or not a member.
 -- Security definer so policies can call it without going through the
