@@ -144,9 +144,9 @@
         <h3>Add someone to this store</h3>
         <label for="uEmail">Email or account ID</label>
         <input id="uEmail" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="name@example.com or ABCD-EF23" required>
-        <label for="uPassword">Password <span class="optional">only for a new account, at least 8 characters</span></label>
+        <label for="uPassword">Password <span class="optional">for a new account; leave empty to have one made up</span></label>
         <input id="uPassword" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" minlength="8">
-        <p class="hint">Someone who already has an account, at any store, can be added with their <strong>account ID</strong> (they find it in their Profile tab) or their email. Leave the password empty: they keep their own. For someone new, enter their email and a password.</p>
+        <p class="hint">Someone who already has an account, at any store, can be added with their <strong>account ID</strong> (they find it in their Profile tab) or their email. Leave the password empty: they keep their own. For someone new, enter their email: they are emailed their sign-in details, with the password you set or one made up for them.</p>
         <label for="uRole">Role</label>
         <select id="uRole">
           <option value="admin">Admin</option>
@@ -417,8 +417,8 @@
   <dialog id="resetDlg" aria-labelledby="resetTitle">
     <form id="resetForm" novalidate>
       <h2 id="resetTitle" tabindex="-1">Reset password</h2>
-      <p class="hint">Set a new password for <strong id="resetEmail"></strong>. The old one stops working at once. Tell them the new password yourself; nothing is emailed.</p>
-      <label for="resetPassword">New password <span class="optional">at least 8 characters</span></label>
+      <p class="hint">Set a new password for <strong id="resetEmail"></strong>. The old one stops working at once, and the new one is emailed to them.</p>
+      <label for="resetPassword">New password <span class="optional">leave empty to have one made up</span></label>
       <div class="inline">
         <input id="resetPassword" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" minlength="8" required>
         <button type="button" id="resetRandom" class="btn">Suggest</button>
@@ -430,6 +430,23 @@
         <button type="submit" id="resetSave" class="btn primary">Set password</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- The sign-in details of an account just created or reset -->
+  <dialog id="credsDlg" aria-labelledby="credsTitle">
+    <h2 id="credsTitle" tabindex="-1"></h2>
+    <p id="credsEmailed" class="hint"></p>
+    <div id="credsPasswordBox" hidden>
+      <p class="hint">Their password (shown only now):</p>
+      <div class="inline">
+        <input id="credsPassword" readonly class="account-id" aria-label="Their password">
+        <button type="button" id="credsCopy" class="btn">Copy</button>
+      </div>
+    </div>
+    <div class="dlg-actions">
+      <span class="spacer"></span>
+      <button type="button" id="credsClose" class="btn primary">Done</button>
+    </div>
   </dialog>
 
   <!-- Password check before changing or cancelling a sale -->

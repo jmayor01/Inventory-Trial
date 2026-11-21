@@ -1153,7 +1153,8 @@ const ROLE_NAMES = { admin: 'Admin', super_admin: 'Super admin' };
 
 /** Calls the manage-users server function, which holds the key needed to create accounts. */
 async function manageUsers(body) {
-  const { data, error } = await sb.functions.invoke('manage-users', { body: { ...body, store_id: store.id } });
+  const appUrl = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}admin.html?store=${encodeURIComponent(store.slug)}`;
+  const { data, error } = await sb.functions.invoke('manage-users', { body: { ...body, store_id: store.id, app_url: appUrl } });
   if (!error) return data;
   let message = '';
   try {
@@ -1231,6 +1232,33 @@ async function loadUsers() {
   }
 }
 
+// ---- Showing sign-in details once ----
+
+/** After creating an account or setting a password: was it emailed, and the password if they need it from you. */
+function showCredentials(title, email, result) {
+  $('credsTitle').textContent = title;
+  $('credsEmailed').textContent = result.emailed
+    ? `The sign-in details were emailed to ${email}.`
+    : `The email to ${email} was not sent: ${result.email_problem || 'unknown problem'}. Give them the password yourself.`;
+  $('credsPasswordBox').hidden = !result.password;
+  $('credsPassword').value = result.password || '';
+  $('credsDlg').showModal();
+  $('credsTitle').focus();
+}
+
+$('credsCopy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('credsPassword').value);
+    toast('Password copied');
+  } catch {
+    $('credsPassword').select();
+    toast('Select the password and copy it by hand.');
+  }
+});
+// The password should not stay on screen or in the page once dismissed.
+$('credsDlg').addEventListener('close', () => { $('credsPassword').value = ''; });
+$('credsClose').addEventListener('click', () => $('credsDlg').close());
+
 // ---- Resetting a password ----
 
 let resetUser = null;
@@ -1260,7 +1288,7 @@ $('resetForm').addEventListener('submit', async (e) => {
   if (!resetUser) return;
   const password = $('resetPassword').value;
   showError('resetError', '');
-  if (password.length < 8) { showError('resetError', 'The password needs at least 8 characters.'); $('resetPassword').focus(); return; }
+  if (password && password.length < 8) { showError('resetError', 'The password needs at least 8 characters, or leave it empty to have one made up.'); $('resetPassword').focus(); return; }
   // Changing someone's password is as sensitive as it gets: confirm it is really you.
   const sure = await confirmWithPassword({
     title: `Set a new password for ${resetUser.email}?`,
@@ -1270,10 +1298,10 @@ $('resetForm').addEventListener('submit', async (e) => {
   if (!sure) return;
   $('resetSave').disabled = true;
   try {
-    await manageUsers({ action: 'set_password', user_id: resetUser.user_id, password });
+    const result = await manageUsers({ action: 'set_password', user_id: resetUser.user_id, password });
     $('resetPassword').value = '';
     $('resetDlg').close();
-    toast(`New password set for ${resetUser.email}`);
+    showCredentials(`New password set for ${resetUser.email}`, resetUser.email, result || {});
   } catch (err) {
     showError('resetError', err.message);
   } finally {
@@ -1296,7 +1324,8 @@ $('userForm').addEventListener('submit', async (e) => {
     const result = await manageUsers({ action: 'add', who, password: isEmail ? password : '', role: $('uRole').value });
     $('userForm').reset();
     const name = (result && result.user && result.user.email) || who;
-    toast(result && result.existing ? `${name} added to ${store.name} with their own password` : `Account created for ${name}`);
+    if (result && result.existing) toast(`${name} added to ${store.name} with their own password`);
+    else showCredentials(`Account created for ${name}`, name, result || {});
     loadUsers();
   } catch (err) {
     showError('userError', err.message);

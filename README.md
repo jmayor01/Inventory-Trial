@@ -120,7 +120,11 @@ Open **Menu → Staff sign in**, or go to `/admin.html`.
   listed. A sale can be edited (quantities and prices) or cancelled; stock
   follows the change, and either one asks for your password first.
 - **Users** (super admin) — create admin or super admin accounts, change a
-  role, reset a forgotten password, remove an account.
+  role, reset a forgotten password, remove an account. Leave the password empty
+  and one is made up. The new account's email and password (or the new
+  password after a reset) are emailed to the person with a link to sign in;
+  if the email can't be sent, the password is shown once so you can pass it on.
+  Ask people to change it in **Profile** after their first sign-in.
 - **Passcodes** — create and delete the codes for people without an account:
   *view only*, or *cashier*, which can also record sales. Give each cashier
   their own so their sales can be told apart.
@@ -152,6 +156,15 @@ viewing; it is removed on sign-out or when the passcode is forgotten.
    as an Edge Function named `manage-users` with **Verify JWT** switched off
    (it checks the caller itself). The **Users** screen needs it to create and
    remove accounts; everything else works without it.
+4. **Emails (optional).** To email new accounts their sign-in details, add
+   secrets to the function (**Edge Functions → Secrets**), either:
+   - **Gmail:** `GMAIL_USER` (the Gmail address) and `GMAIL_APP_PASSWORD` (an
+     *app password* from Google Account → Security → 2-Step Verification →
+     App passwords; not the normal password), or
+   - **Resend:** `RESEND_API_KEY` and `EMAIL_FROM` (such as
+     `Inventory <no-reply@yourdomain.com>`, on a domain verified in Resend).
+
+   Without them, accounts are still created and the password is shown to you.
 
 To use a different Supabase project, change the two values in `config.js` (the
 *publishable* key only — never a secret key) and repeat the steps above.
