@@ -398,6 +398,12 @@ body.admin:not([data-view="norole"]) #noRoleView { display: none; }
 body.admin:not([data-role="super_admin"]) [data-role="super_admin"] { display: none !important; }
 
 .whoami { margin: 0; }
+.account-id { min-height: 32px; margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .06em; }
+.profile-facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 10px 0; align-items: center; }
+.profile-facts dt { color: var(--muted); font-size: .9rem; }
+.profile-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+#tab-profile .card-form { margin-top: 12px; }
+.profile-stores { margin-top: 8px; }
 .store-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 14px; margin-bottom: 12px; }
 .store-current { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .store-label { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }

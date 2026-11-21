@@ -78,11 +78,26 @@ Deno.serve(async (req) => {
   };
 
   if (body.action === 'add') {
-    const email = String(body.email ?? '').trim().toLowerCase();
+    // "who" is an email address, or the 8-character account ID someone shared.
+    const who = String(body.who ?? body.email ?? '').trim();
     const password = String(body.password ?? '');
     const role = String(body.role ?? '');
-    if (!/^\S+@\S+\.\S+$/.test(email)) return json(400, { error: 'Enter a valid email address.' });
     if (role !== 'admin' && role !== 'super_admin') return json(400, { error: 'Choose a role.' });
+
+    if (!who.includes('@')) {
+      const code = who.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (!/^[A-Z0-9]{8}$/.test(code)) return json(400, { error: 'Enter an email address or an 8-character account ID.' });
+      const { data: found } = await admin.from('profiles').select('user_id, email').eq('account_code', code).maybeSingle();
+      if (!found) return json(404, { error: 'No account has that ID. Check it with the person.' });
+      const { data: already } = await admin.from('store_members').select('role').eq('store_id', storeId).eq('user_id', found.user_id).maybeSingle();
+      if (already) return json(409, { error: 'That person is already in this store.' });
+      const { error } = await admin.from('store_members').insert({ store_id: storeId, user_id: found.user_id, role });
+      if (error) return json(500, { error: 'Could not add them to the store.' });
+      return json(200, { user: { user_id: found.user_id, email: found.email, role }, existing: true });
+    }
+
+    const email = who.toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(email)) return json(400, { error: 'Enter a valid email address.' });
 
     // Someone who already has an account (for instance at another store) is
     // just added to this store, with their own password unchanged.

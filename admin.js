@@ -23,6 +23,10 @@ let role = null; // 'admin' | 'super_admin', in the current store
 let store = null; // { id, name, slug, role }: the store being worked on
 let myStores = []; // every store this account works at
 let userEmail = '';
+let myAccountId = '';
+
+/** ABCDEF23 -> ABCD-EF23, easier to read out and type. */
+const showAccountId = (code) => (code && code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code || '');
 const isSuper = () => role === 'super_admin';
 let filter = 'all'; // 'all' | 'nocost' | 'loss'
 let editingId = null;
@@ -892,6 +896,7 @@ function showTab(name) {
   if (currentTab === 'users') loadUsers();
   if (currentTab === 'codes') loadCodes();
   if (currentTab === 'store') showStoreTab();
+  if (currentTab === 'profile') showProfileTab();
 }
 for (const tab of document.querySelectorAll('.tab')) tab.addEventListener('click', () => showTab(tab.dataset.tab));
 
@@ -1160,24 +1165,24 @@ async function manageUsers(body) {
 async function loadUsers() {
   const forStore = store.id;
   const { data: rows, error } = await sb.from('store_members')
-    .select('user_id, role, created_at, profiles(email)')
+    .select('user_id, role, created_at, profiles(email, account_code, display_name)')
     .eq('store_id', forStore).order('created_at');
   if (forStore !== store.id) return;
   if (error) { setStatus(explain(error, 'Could not load the users.')); return; }
-  const data = rows.map((r) => ({ user_id: r.user_id, role: r.role, email: (r.profiles && r.profiles.email) || '' }));
+  const data = rows.map((r) => ({ user_id: r.user_id, role: r.role, email: (r.profiles && r.profiles.email) || '', code: (r.profiles && r.profiles.account_code) || '', name: (r.profiles && r.profiles.display_name) || '' }));
   const list = $('userList');
   list.replaceChildren();
   for (const u of data) {
     const mine = u.user_id === userId;
     const li = el('li', 'row-card');
     const main = el('div', 'row-main');
-    main.append(el('div', 'row-title', u.email || '(no email)'), el('div', 'hint', mine ? `${ROLE_NAMES[u.role]} · you` : ROLE_NAMES[u.role]));
+    main.append(el('div', 'row-title', u.name ? `${u.name} (${u.email})` : u.email || '(no email)'), el('div', 'hint', `${mine ? `${ROLE_NAMES[u.role]} · you` : ROLE_NAMES[u.role]}${u.code ? ` · ID ${showAccountId(u.code)}` : ''}`));
     li.append(main);
     // Anyone who forgot their password gets a new one here, the super admin included.
-    const reset = el('button', 'btn', mine ? 'Change my password' : 'Reset password');
+    const reset = el('button', 'btn', mine ? 'My profile' : 'Reset password');
     reset.type = 'button';
-    reset.setAttribute('aria-label', mine ? 'Change my password' : `Reset the password of ${u.email}`);
-    reset.addEventListener('click', () => openReset(u));
+    reset.setAttribute('aria-label', mine ? 'Open my profile' : `Reset the password of ${u.email}`);
+    reset.addEventListener('click', () => (mine ? showTab('profile') : openReset(u)));
     if (mine) {
       const actions = el('div', 'row-actions');
       actions.append(reset);
@@ -1278,17 +1283,20 @@ $('resetForm').addEventListener('submit', async (e) => {
 
 $('userForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const email = $('uEmail').value.trim();
+  const who = $('uEmail').value.trim();
   const password = $('uPassword').value;
   showError('userError', '');
-  if (!/^\S+@\S+\.\S+$/.test(email)) { showError('userError', 'Enter a valid email address.'); $('uEmail').focus(); return; }
+  const isEmail = who.includes('@');
+  if (isEmail && !/^\S+@\S+\.\S+$/.test(who)) { showError('userError', 'Enter a valid email address.'); $('uEmail').focus(); return; }
+  if (!isEmail && !/^[A-Za-z0-9]{8}$/.test(who.replace(/[\s-]/g, ''))) { showError('userError', 'Enter an email address or an 8-character account ID.'); $('uEmail').focus(); return; }
   if (password && password.length < 8) { showError('userError', 'The password needs at least 8 characters.'); $('uPassword').focus(); return; }
   $('userSave').disabled = true;
   $('userSave').textContent = 'Adding…';
   try {
-    const result = await manageUsers({ action: 'add', email, password, role: $('uRole').value });
+    const result = await manageUsers({ action: 'add', who, password: isEmail ? password : '', role: $('uRole').value });
     $('userForm').reset();
-    toast(result && result.existing ? `${email} added to ${store.name} with their own password` : `Account created for ${email}`);
+    const name = (result && result.user && result.user.email) || who;
+    toast(result && result.existing ? `${name} added to ${store.name} with their own password` : `Account created for ${name}`);
     loadUsers();
   } catch (err) {
     showError('userError', err.message);
@@ -1483,6 +1491,91 @@ function switchStore(slug) {
 
 $('storeSwitch').addEventListener('change', () => switchStore($('storeSwitch').value));
 
+// ---------- My profile ----------
+
+let myProfile = null; // { account_code, display_name }
+
+async function loadMyProfile(id) {
+  const { data } = await sb.from('profiles').select('account_code, display_name').eq('user_id', id).maybeSingle();
+  if (userId !== id) return null;
+  myProfile = data || null;
+  myAccountId = showAccountId(myProfile && myProfile.account_code);
+  return myProfile;
+}
+
+function showProfileTab() {
+  $('profEmail').textContent = userEmail;
+  $('profIdCopy').textContent = myAccountId || '—';
+  $('profName').value = (myProfile && myProfile.display_name) || '';
+  showError('profNameError', '');
+  showError('profPasswordError', '');
+  const list = $('profStores');
+  list.replaceChildren(...myStores.map((s) => {
+    const li = el('li', 'row-card');
+    const main = el('div', 'row-main');
+    main.append(el('div', 'row-title', s.name), el('div', 'hint', `${ROLE_NAMES[s.role]}${s.id === store.id ? ' · open now' : ''}`));
+    li.append(main);
+    if (s.id !== store.id) {
+      const go = el('button', 'btn', 'Open');
+      go.type = 'button';
+      go.setAttribute('aria-label', `Open ${s.name}`);
+      go.addEventListener('click', () => { currentTab = 'products'; switchStore(s.slug); window.scrollTo(0, 0); });
+      const actions = el('div', 'row-actions');
+      actions.append(go);
+      li.append(actions);
+    }
+    return li;
+  }));
+}
+
+$('profIdCopy').addEventListener('click', async () => {
+  if (!myAccountId) return;
+  try {
+    await navigator.clipboard.writeText(myAccountId);
+    toast('Account ID copied');
+  } catch {
+    toast(`Your account ID is ${myAccountId}`);
+  }
+});
+
+$('profNameForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('profName').value.trim();
+  showError('profNameError', '');
+  $('profNameSave').disabled = true;
+  const { data, error } = await sb.from('profiles').update({ display_name: name }).eq('user_id', userId).select('display_name');
+  $('profNameSave').disabled = false;
+  if (error || !data.length) { showError('profNameError', explain(error, 'Could not save your name.')); return; }
+  if (myProfile) myProfile.display_name = name;
+  toast(name ? 'Name saved' : 'Name removed');
+});
+
+$('profPasswordForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const current = $('profCurrent').value;
+  const next = $('profNew').value;
+  showError('profPasswordError', '');
+  if (!current) { showError('profPasswordError', 'Enter your current password.'); $('profCurrent').focus(); return; }
+  if (next.length < 8) { showError('profPasswordError', 'The new password needs at least 8 characters.'); $('profNew').focus(); return; }
+  if (next !== $('profNew2').value) { showError('profPasswordError', 'The two new passwords are not the same.'); $('profNew2').focus(); return; }
+  if (next === current) { showError('profPasswordError', 'The new password is the same as the current one.'); return; }
+  $('profPasswordSave').disabled = true;
+  try {
+    // Signing in again checks the current password (and counts wrong ones).
+    const check = await passwordSignIn(userEmail, current);
+    if (!check.ok) {
+      showError('profPasswordError', check.message || 'Your current password is not right.');
+      return;
+    }
+    const { error } = await sb.auth.updateUser({ password: next });
+    if (error) { showError('profPasswordError', explain(error, 'Could not change your password.')); return; }
+    $('profPasswordForm').reset();
+    toast('Password changed');
+  } finally {
+    $('profPasswordSave').disabled = false;
+  }
+});
+
 // ---------- Sign in / out ----------
 
 const signOut = () => sb.auth.signOut({ scope: 'local' });
@@ -1524,11 +1617,15 @@ async function applySession(session) {
   if (userId !== id) return; // changed while we were asking
   if (!stores.length) {
     $('noRoleEmail').textContent = user.email || '';
+    $('noRoleIdLine').hidden = true;
     document.body.dataset.view = 'norole';
+    // So they can be added to a store, show the account ID if they have one.
+    loadMyProfile(id).then((p) => { if (p && p.account_code) { $('noRoleId').textContent = showAccountId(p.account_code); $('noRoleIdLine').hidden = false; } });
     return;
   }
   myStores = stores;
   store = chooseStore(stores);
+  if (location.hash === '#profile') currentTab = 'profile';
   role = store.role;
   rememberStore(store.slug);
   showStoreInLink(store.slug);
@@ -1537,8 +1634,9 @@ async function applySession(session) {
   userEmail = user.email || '';
   $('whoEmail').textContent = userEmail;
   showStore();
+  await loadMyProfile(id);
   $('cCode').value = randomCode();
-  showTab('products');
+  showTab(currentTab === 'profile' ? 'profile' : 'products');
   render();
   refreshQuietly();
 }

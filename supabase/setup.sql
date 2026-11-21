@@ -69,6 +69,20 @@ create table if not exists public.profiles (
 );
 alter table public.profiles alter column role drop not null;
 
+-- Every account has a short ID that its owner can share, so that a super admin
+-- can add them to a store without needing their email address. Eight letters
+-- and digits, leaving out ones that look alike (0/O, 1/I/L).
+create or replace function public.new_account_code()
+returns text language sql volatile set search_path = '' as $$
+  select string_agg(substr('ABCDEFGHJKMNPQRSTUVWXYZ23456789', 1 + floor(random() * 31)::int, 1), '')
+    from generate_series(1, 8);
+$$;
+alter table public.profiles add column if not exists account_code text not null default public.new_account_code();
+create unique index if not exists profiles_account_code_unique on public.profiles (account_code);
+
+-- An optional name that people choose for themselves, shown beside their email.
+alter table public.profiles add column if not exists display_name text not null default '' check (length(display_name) <= 80);
+
 create table if not exists public.stores (
   id uuid primary key default gen_random_uuid(),
   name text not null check (length(trim(name)) between 1 and 80),
@@ -249,6 +263,11 @@ drop policy if exists "See own profile or your store's people" on public.profile
 create policy "See own profile or your store's people" on public.profiles
   for select to authenticated using (public.can_see_profile(user_id));
 
+-- Everyone can change their own display name (and nothing else about the profile).
+drop policy if exists "Update own display name" on public.profiles;
+create policy "Update own display name" on public.profiles
+  for update to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+
 drop policy if exists "Members can see their stores" on public.stores;
 create policy "Members can see their stores" on public.stores
   for select to authenticated using (public.is_store_member(id));
@@ -291,7 +310,7 @@ revoke all on public.items, public.item_photos, public.item_costs, public.profil
   public.store_members, public.access_codes from anon;
 grant select, insert, update, delete on public.items, public.item_photos, public.item_costs, public.access_codes to authenticated;
 revoke all on public.profiles, public.stores, public.store_members from authenticated;
-grant select on public.profiles to authenticated;
+grant select, update (display_name) on public.profiles to authenticated;
 grant select, update (name) on public.stores to authenticated;
 grant select, update (role) on public.store_members to authenticated;
 
@@ -300,6 +319,7 @@ revoke all on function public.store_role(uuid), public.is_store_member(uuid), pu
 grant execute on function public.store_role(uuid), public.is_store_member(uuid), public.is_store_super_admin(uuid),
   public.can_see_profile(uuid) to authenticated;
 revoke all on function public.default_store_id() from public, anon, authenticated;
+revoke all on function public.new_account_code() from public, anon, authenticated;
 
 -- Creates another store. Any super admin may, and becomes its super admin.
 create or replace function public.create_store(p_name text, p_slug text)

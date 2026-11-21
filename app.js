@@ -203,6 +203,7 @@ function showStore() {
   const q = store ? `?store=${encodeURIComponent(store.slug)}` : '';
   $('backOfficeLink').href = `admin.html${q}`;
   $('staffSignInLink').href = `admin.html${q}`;
+  $('profileLink').href = `admin.html${q}#profile`;
   const select = $('storeSwitch');
   select.replaceChildren(...myStores.map((s) => { const o = el('option', '', s.name); o.value = s.slug; o.selected = store && s.id === store.id; return o; }));
   $('storeSwitchRow').hidden = !(mode === 'staff' && myStores.length > 1);

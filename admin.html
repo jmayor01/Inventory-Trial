@@ -44,7 +44,8 @@
 
   <section id="noRoleView" class="login" aria-labelledby="noRoleTitle">
     <h2 id="noRoleTitle">This account has no access</h2>
-    <p class="hint">You are signed in as <strong id="noRoleEmail"></strong>, but the account has not been given a role. Ask the super admin to add it under Users.</p>
+    <p class="hint">You are signed in as <strong id="noRoleEmail"></strong>, but this account is not in any store yet. Ask a store's super admin to add you under Users.</p>
+    <p class="hint" id="noRoleIdLine" hidden>Give them your account ID: <strong id="noRoleId" class="account-id"></strong></p>
     <button id="noRoleSignOut" type="button" class="btn">Sign out</button>
   </section>
 
@@ -64,6 +65,7 @@
       <button type="button" class="tab" role="tab" data-tab="users" aria-selected="false" data-role="super_admin">Users</button>
       <button type="button" class="tab" role="tab" data-tab="codes" aria-selected="false">Passcodes</button>
       <button type="button" class="tab" role="tab" data-tab="store" aria-selected="false">Store</button>
+      <button type="button" class="tab" role="tab" data-tab="profile" aria-selected="false">Profile</button>
     </div>
     <p id="status" class="status" role="status" hidden></p>
 
@@ -140,11 +142,11 @@
       <ul id="userList" class="list plain"></ul>
       <form id="userForm" class="card-form" novalidate>
         <h3>Add someone to this store</h3>
-        <label for="uEmail">Email</label>
-        <input id="uEmail" type="email" autocomplete="off" autocapitalize="off" required>
-        <label for="uPassword">Password <span class="optional">for a new account, at least 8 characters</span></label>
+        <label for="uEmail">Email or account ID</label>
+        <input id="uEmail" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="name@example.com or ABCD-EF23" required>
+        <label for="uPassword">Password <span class="optional">only for a new account, at least 8 characters</span></label>
         <input id="uPassword" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" minlength="8">
-        <p class="hint">Someone who already has an account at another store is added as they are: leave the password empty, they keep their own.</p>
+        <p class="hint">Someone who already has an account, at any store, can be added with their <strong>account ID</strong> (they find it in their Profile tab) or their email. Leave the password empty: they keep their own. For someone new, enter their email and a password.</p>
         <label for="uRole">Role</label>
         <select id="uRole">
           <option value="admin">Admin</option>
@@ -177,6 +179,40 @@
         <button id="codeSave" type="submit" class="btn primary">Create passcode</button>
       </form>
     </div>
+    <div id="tab-profile" class="tabpanel" hidden>
+      <h2 class="section-title">My profile</h2>
+      <section class="card-form">
+        <h3>Account</h3>
+        <dl class="profile-facts">
+          <dt>Email</dt><dd id="profEmail"></dd>
+          <dt>Account ID</dt><dd><button type="button" id="profIdCopy" class="btn link account-id" aria-label="Copy your account ID"></button></dd>
+        </dl>
+        <p class="hint">To be added to another store, give your account ID to a super admin of that store. It only identifies you: nobody can sign in with it.</p>
+      </section>
+      <form id="profNameForm" class="card-form" novalidate>
+        <h3>Your name</h3>
+        <label for="profName">Name shown to others <span class="optional">optional</span></label>
+        <input id="profName" maxlength="80" autocomplete="name">
+        <p id="profNameError" class="error" role="alert" hidden></p>
+        <button type="submit" id="profNameSave" class="btn primary">Save name</button>
+      </form>
+      <section class="card-form">
+        <h3>My stores</h3>
+        <ul id="profStores" class="list plain profile-stores"></ul>
+      </section>
+      <form id="profPasswordForm" class="card-form" novalidate>
+        <h3>Change my password</h3>
+        <label for="profCurrent">Current password</label>
+        <input id="profCurrent" type="password" autocomplete="current-password">
+        <label for="profNew">New password <span class="optional">at least 8 characters</span></label>
+        <input id="profNew" type="password" autocomplete="new-password" minlength="8">
+        <label for="profNew2">New password again</label>
+        <input id="profNew2" type="password" autocomplete="new-password" minlength="8">
+        <p id="profPasswordError" class="error" role="alert" hidden></p>
+        <button type="submit" id="profPasswordSave" class="btn primary">Change password</button>
+      </form>
+    </div>
+
     <div id="tab-store" class="tabpanel" hidden>
       <h2 class="section-title">Store</h2>
       <section class="card-form">

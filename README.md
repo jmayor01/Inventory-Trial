@@ -51,6 +51,12 @@ for example an owner who monitors all of them.
   store is deleted.
 - A super admin can reset a password only for someone whose every store they
   also run, because a password opens all of that person's stores.
+- **Account ID** — every account has an 8-character ID (such as `ABCD-EF23`),
+  shown in **Back office → Profile**. A super admin adds someone who already
+  has an account by typing that ID (or their email) under Users.
+- **Profile** — everyone has a Profile tab: email, account ID, an optional
+  display name shown to others, the stores they belong to, and a form to change
+  their own password. The app's Menu links to it.
 
 ## Who can do what
 
